@@ -33,7 +33,3 @@ class MonoWebhookPayload(BaseModel):
     type: str
     data: dict[str, Any]
 
-
-class MonoWebhookPayload(BaseModel):
-    type: str
-    data: dict[str, Any]
