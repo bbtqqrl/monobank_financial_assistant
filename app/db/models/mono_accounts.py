@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from db.base import Base
 
 
 class MonoAccount(Base):

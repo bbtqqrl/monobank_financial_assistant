@@ -1,7 +1,7 @@
 from sqlalchemy import JSON, BigInteger, ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from db.base import Base
 
 
 class TransactionRaw(Base):

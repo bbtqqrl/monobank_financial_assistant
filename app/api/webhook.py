@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.services.webhook_service import MonobankWebhookService
+from db.session import get_db
+from services.webhook_service import MonobankWebhookService
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 

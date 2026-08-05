@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.transaction import TransactionRaw
+from db.models.transaction import TransactionRaw
 
 
 class TransactionRepository:

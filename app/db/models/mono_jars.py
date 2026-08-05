@@ -1,6 +1,6 @@
 from sqlalchemy import ForeignKey, Integer, String, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
-from app.db.base import Base
+from db.base import Base
 
 
 class MonoJar(Base):

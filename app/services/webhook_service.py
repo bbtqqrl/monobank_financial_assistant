@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.account import AccountRepository
-from app.repositories.transaction import TransactionRepository
+from repositories.account import AccountRepository
+from repositories.transaction import TransactionRepository
 
 
 class MonobankWebhookService:

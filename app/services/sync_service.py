@@ -2,12 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.user import User
 from services.api_client import MonobankAPIClient
-from app.repositories.transaction import (
-    UserRepository,
-    AccountRepository,
-    JarRepository
-)
-
+from repositories.user import UserRepository
+from repositories.account import AccountRepository
+from repositories.jar import JarRepository
 
 class MonobankSyncService:
     

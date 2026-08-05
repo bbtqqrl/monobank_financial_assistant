@@ -18,15 +18,15 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from app.db.base import Base
-from app.db.tables.mono_accounts import MonoAccount
-from app.db.tables.mono_jars import MonoJar
-from app.db.tables.transaction import TransactionRaw
-from app.db.tables.user import User
+from db.base import Base
+from db.tables.mono_accounts import MonoAccount
+from db.tables.mono_jars import MonoJar
+from db.tables.transaction import TransactionRaw
+from db.tables.user import User
 
 target_metadata = Base.metadata
 
-from app.db.session import DATABASE_URL
+from db.session import DATABASE_URL
 
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 # other values from the config, defined by the needs of env.py,
