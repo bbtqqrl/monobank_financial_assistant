@@ -19,8 +19,10 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.db.base import Base
-from app.db.models.user import User
-from app.db.models.transaction import TransactionRaw
+from app.db.tables.mono_accounts import MonoAccount
+from app.db.tables.mono_jars import MonoJar
+from app.db.tables.transaction import TransactionRaw
+from app.db.tables.user import User
 
 target_metadata = Base.metadata
 

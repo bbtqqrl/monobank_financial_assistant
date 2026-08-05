@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import uvicorn
 
-from app.api.user_info import router as monobank_router  
+from app.api.user_connect import router as monobank_router  
 
 app = FastAPI()
 

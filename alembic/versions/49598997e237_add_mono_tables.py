@@ -1,8 +1,8 @@
-"""init
+"""add mono tables
 
-Revision ID: 09a4e8305291
-Revises: 4972bad35664
-Create Date: 2026-06-06 22:07:40.756003
+Revision ID: 49598997e237
+Revises: 275eda44f882
+Create Date: 2026-06-08 20:05:05.646407
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '09a4e8305291'
-down_revision: Union[str, Sequence[str], None] = '4972bad35664'
+revision: str = '49598997e237'
+down_revision: Union[str, Sequence[str], None] = '275eda44f882'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
