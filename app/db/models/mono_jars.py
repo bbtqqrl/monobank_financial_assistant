@@ -1,6 +1,8 @@
 from sqlalchemy import ForeignKey, Integer, String, BigInteger
-from sqlalchemy.orm import Mapped, mapped_column
-from db.base import Base
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.db.base import Base
+from app.db.models.transaction import TransactionRaw
+from app.db.models.user import User
 
 
 class MonoJar(Base):
@@ -19,3 +21,11 @@ class MonoJar(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     currency_code: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(default=True)
+
+    user: Mapped["User"] = relationship(
+        back_populates="jars",
+    )
+
+    transactions: Mapped[list["TransactionRaw"]] = relationship(
+        back_populates="jar",
+    )

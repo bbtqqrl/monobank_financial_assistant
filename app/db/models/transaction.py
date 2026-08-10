@@ -1,7 +1,10 @@
 from sqlalchemy import JSON, BigInteger, ForeignKey, Integer, String, Text, Boolean
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.base import Base
+from app.db.base import Base
+from app.db.models.mono_accounts import MonoAccount
+from app.db.models.mono_jars import MonoJar
+from app.db.models.user import User
 
 
 class TransactionRaw(Base):
@@ -14,8 +17,15 @@ class TransactionRaw(Base):
         index=True,
     )
 
-    account_id: Mapped[int] = mapped_column(
-        ForeignKey("mono_accounts.id", ondelete="CASCADE"),
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mono_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    jar_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mono_jars.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -42,3 +52,15 @@ class TransactionRaw(Base):
     counter_iban: Mapped[str | None] = mapped_column(String, nullable=True)
     counter_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_json: Mapped[dict] = mapped_column(JSON)
+
+    user: Mapped["User"] = relationship(
+        back_populates="transactions",
+    )
+
+    account: Mapped["MonoAccount | None"] = relationship(
+        back_populates="transactions",
+    )
+
+    jar: Mapped["MonoJar | None"] = relationship(
+        back_populates="transactions",
+    )

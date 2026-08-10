@@ -1,7 +1,9 @@
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.base import Base
+from app.db.base import Base
+from app.db.models.transaction import TransactionRaw
+from app.db.models.user import User
 
 
 class MonoAccount(Base):
@@ -29,3 +31,11 @@ class MonoAccount(Base):
     account_type: Mapped[str] = mapped_column(String)
     iban: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped["User"] = relationship(
+        back_populates="accounts",
+    )
+
+    transactions: Mapped[list["TransactionRaw"]] = relationship(
+        back_populates="account",
+    )
