@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 import uvicorn
+import logging
 
-from api.user_connect import router as monobank_router  
-from api.webhook import router as webhook_router
+logging.basicConfig(level=logging.INFO)
+from app.api.user_connect import router as monobank_router  
+from app.api.webhook import router as webhook_router
 app = FastAPI()
 
 app.include_router(webhook_router)

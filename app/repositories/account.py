@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
 
-from db.models.user import User
-from db.models.mono_accounts import MonoAccount
+from app.db.models.user import User
+from app.db.models.mono_accounts import MonoAccount
 
 
 class AccountRepository:

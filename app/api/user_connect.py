@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.session import get_db
-from schemas.monobank import (ConnectMonobankRequest,ConnectMonobankResponse,)
-from services.sync_service import MonobankSyncService
+from app.db.session import get_db
+from app.schemas.monobank import (ConnectMonobankRequest,ConnectMonobankResponse,)
+from app.services.api_client import MonobankAPIClient
+from app.services.sync_service import MonobankSyncService
 
 router = APIRouter(prefix="/monobank", tags=["Monobank"])
 
@@ -25,3 +26,11 @@ async def connect_monobank(data: ConnectMonobankRequest,db: AsyncSession = Depen
             status_code=400,
             detail=str(e),
         )
+
+@router.post("/debug/client-info")
+async def client_info(data: ConnectMonobankRequest):
+    service = MonobankAPIClient()
+    try:
+        return await service.get_client_info(data.token)
+    finally:
+        await service.close()

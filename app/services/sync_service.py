@@ -1,14 +1,16 @@
+import os
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models.user import User
-from services.api_client import MonobankAPIClient
-from repositories.user import UserRepository
-from repositories.account import AccountRepository
-from repositories.jar import JarRepository
+from app.db.models.user import User
+from app.services.api_client import MonobankAPIClient
+from app.repositories.user import UserRepository
+from app.repositories.account import AccountRepository
+from app.repositories.jar import JarRepository
 
 class MonobankSyncService:
     
-    WEBHOOK_URL = "https://YOUR_NGROK_URL/webhooks/monobank"
+    WEBHOOK_URL = os.getenv("MONO_WEBHOOK_URL")
     
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -22,6 +24,7 @@ class MonobankSyncService:
             client_info = await self.api.get_client_info(token)
             
             user = await self.users.create_or_update(
+                telegram_id=123123123132,
                 client_id=client_info["clientId"],
                 token=token
             )

@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
 
-from db.models.user import User
-from db.models.mono_jars import MonoJar
+from app.db.models.user import User
+from app.db.models.mono_jars import MonoJar
 
 class JarRepository:
     
