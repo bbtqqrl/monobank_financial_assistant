@@ -2,6 +2,9 @@ from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.models.categories import Category
+from app.db.models.transaction_categories import TransactionCategory
+from app.db.models.user import User
 
 
 class MerchantCategoryMapping(Base):

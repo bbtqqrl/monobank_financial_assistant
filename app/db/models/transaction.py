@@ -4,6 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.models.mono_accounts import MonoAccount
 from app.db.models.mono_jars import MonoJar
+from app.db.models.transaction_categories import TransactionCategory
 from app.db.models.user import User
 
 
@@ -63,4 +64,10 @@ class TransactionRaw(Base):
 
     jar: Mapped["MonoJar | None"] = relationship(
         back_populates="transactions",
+    )
+
+    category: Mapped["TransactionCategory | None"] = relationship(
+        back_populates="transaction",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
