@@ -22,12 +22,19 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.db.base import Base
-from app.db.models.mono_accounts import MonoAccount
-from app.db.models.mono_jars import MonoJar
-from app.db.models.transaction import TransactionRaw
-from app.db.models.user import User
 
 target_metadata = Base.metadata
+
+from app.db.models import (
+    MonoAccount,
+    TransactionRaw,
+    User,
+    Category,
+    TransactionCategory,
+    MerchantCategoryMapping,
+    MonoJar,
+    MccCode,
+)
 
 from app.db.session import DATABASE_URL
 

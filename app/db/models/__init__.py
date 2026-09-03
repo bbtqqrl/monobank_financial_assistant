@@ -5,3 +5,4 @@ from app.db.models.categories import Category
 from app.db.models.transaction_categories import TransactionCategory
 from app.db.models.merchant_category_mappings import MerchantCategoryMapping
 from app.db.models.mono_jars import MonoJar
+from app.db.models.mcc_codes import MccCode
