@@ -1,8 +1,8 @@
 from sqlalchemy import ForeignKey, Integer, String, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
-from app.db.models.transaction import TransactionRaw
-from app.db.models.user import User
+from app.db.models import TransactionRaw
+from app.db.models import User
 
 
 class MonoJar(Base):

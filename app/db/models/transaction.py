@@ -2,10 +2,10 @@ from sqlalchemy import JSON, BigInteger, ForeignKey, Integer, String, Text, Bool
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.models.mono_accounts import MonoAccount
-from app.db.models.mono_jars import MonoJar
-from app.db.models.transaction_categories import TransactionCategory
-from app.db.models.user import User
+from app.db.models import MonoAccount
+from app.db.models import MonoJar
+from app.db.models import TransactionCategory
+from app.db.models import User
 
 
 class TransactionRaw(Base):

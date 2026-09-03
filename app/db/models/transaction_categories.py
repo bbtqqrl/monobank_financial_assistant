@@ -2,8 +2,8 @@ from sqlalchemy import ForeignKey, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.models.merchant_category_mappings import MerchantCategoryMapping
-from app.db.models.transaction import TransactionRaw
+from app.db.models import MerchantCategoryMapping
+from app.db.models import TransactionRaw
 
 
 class TransactionCategory(Base):
