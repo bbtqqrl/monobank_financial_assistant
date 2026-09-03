@@ -1,11 +1,14 @@
+from typing import TYPE_CHECKING
+
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.models import TransactionRaw
-from app.db.models import User
 
 
+if TYPE_CHECKING:
+    from app.db.models.transaction import TransactionRaw
+    from app.db.models.user import User
 class MonoAccount(Base):
     __tablename__ = "mono_accounts"
 

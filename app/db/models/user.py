@@ -1,10 +1,15 @@
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base
-from app.db.models.mono_accounts import MonoAccount
-from app.db.models.mono_jars import MonoJar
-from app.db.models.transaction import TransactionRaw
 
+from app.db.base import Base
+
+
+if TYPE_CHECKING:
+    from app.db.models.mono_accounts import MonoAccount
+    from app.db.models.mono_jars import MonoJar
+    from app.db.models.transaction import TransactionRaw
 
 class User(Base):
     __tablename__ = "users"

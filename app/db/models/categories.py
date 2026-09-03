@@ -1,9 +1,14 @@
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from typing import TYPE_CHECKING
+
 from app.db.base import Base
-from app.db.models import MerchantCategoryMapping
-from app.db.models import TransactionCategory
+
+
+if TYPE_CHECKING:
+    from app.db.models.merchant_category_mappings import MerchantCategoryMapping
+    from app.db.models.transaction_categories import TransactionCategory
 
 
 class Category(Base):

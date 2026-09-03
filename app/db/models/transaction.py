@@ -1,12 +1,16 @@
 from sqlalchemy import JSON, BigInteger, ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
-from app.db.models import MonoAccount
-from app.db.models import MonoJar
-from app.db.models import TransactionCategory
-from app.db.models import User
+from typing import TYPE_CHECKING
 
+from app.db.base import Base
+
+
+if TYPE_CHECKING:
+    from app.db.models.mono_accounts import MonoAccount
+    from app.db.models.mono_jars import MonoJar
+    from app.db.models.transaction_categories import TransactionCategory
+    from app.db.models.user import User
 
 class TransactionRaw(Base):
     __tablename__ = "transactions"
