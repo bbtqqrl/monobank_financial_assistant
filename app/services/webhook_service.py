@@ -2,6 +2,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.transaction import TransactionRaw
 from app.repositories.account import AccountRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.monobank import MonoWebhookPayload
@@ -18,7 +19,7 @@ class MonobankWebhookService:
         self.accounts = AccountRepository(db)
         self.transactions = TransactionRepository(db)
 
-    async def process(self, payload: MonoWebhookPayload):
+    async def process(self, payload: MonoWebhookPayload) -> TransactionRaw | None:
         logger.info("Monobank webhook received: %s", payload)
 
         mono_id  = payload.data.account
@@ -30,7 +31,7 @@ class MonobankWebhookService:
 
         if exists:
             logger.info("Transaction already exists: id=%s", transaction.id)
-            return
+            return None
 
         logger.info(
             "Transaction received: id=%s, account=%s, description=%s, amount=%s, currency=%s",
@@ -51,12 +52,12 @@ class MonobankWebhookService:
 
             if jar is None:
                 logger.warning("Account or jar not found: mono_id=%s", mono_id)
-                return
+                return None
 
             jar_id = jar.id
             user_id = jar.user_id
 
-        await self.transactions.create(
+        db_transaction = await self.transactions.create(
             user_id=user_id,
             account_id=account_id,
             jar_id=jar_id,
@@ -66,3 +67,5 @@ class MonobankWebhookService:
         await self.db.commit()
 
         logger.info("Transaction saved successfully: id=%s", transaction.id)
+
+        return db_transaction

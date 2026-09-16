@@ -12,6 +12,13 @@ class TransactionRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def get_by_id(self, transaction_id: int) -> Optional[TransactionRaw]:
+        result = await self.db.execute(
+            select(TransactionRaw).where(TransactionRaw.id == transaction_id)
+        )
+
+        return result.scalar_one_or_none()
+
     async def get_by_mono_id(self, mono_transaction_id: str) -> Optional[TransactionRaw]:
         result = await self.db.execute(
             select(TransactionRaw).where(

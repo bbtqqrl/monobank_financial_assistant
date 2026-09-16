@@ -7,6 +7,7 @@ from app.db.base import Base
 
 
 if TYPE_CHECKING:
+    from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.mono_accounts import MonoAccount
     from app.db.models.mono_jars import MonoJar
     from app.db.models.transaction import TransactionRaw
@@ -30,6 +31,11 @@ class User(Base):
     )
 
     transactions: Mapped[list["TransactionRaw"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    merchant_mappings: Mapped[list["MerchantCategoryMapping"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

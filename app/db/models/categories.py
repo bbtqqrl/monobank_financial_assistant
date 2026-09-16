@@ -1,4 +1,4 @@
-from sqlalchemy import String
+from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -24,7 +24,22 @@ class Category(Base):
         nullable=False,
     )
 
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    parent: Mapped["Category | None"] = relationship(
+        back_populates="children",
+        remote_side="Category.id",
+    )
+
+    children: Mapped[list["Category"]] = relationship(
+        back_populates="parent",
+    )
 
     transaction_categories: Mapped[list["TransactionCategory"]] = relationship(
         back_populates="category",
