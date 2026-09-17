@@ -4,31 +4,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User
 from app.services.api_client import MonobankAPIClient
-from app.repositories.user import UserRepository
 from app.repositories.account import AccountRepository
 from app.repositories.jar import JarRepository
 
 class MonobankSyncService:
-    
+
     WEBHOOK_URL = os.getenv("MONO_WEBHOOK_URL")
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.api = MonobankAPIClient()
-        self.users = UserRepository(db)
         self.accounts = AccountRepository(db)
         self.jars = JarRepository(db)
     
-    async def connect(self, token: str) -> dict:
+    async def connect(self, user: User, token: str) -> dict:
         try:
             client_info = await self.api.get_client_info(token)
-            
-            user = await self.users.create_or_update(
-                telegram_id=123123123132,
-                client_id=client_info["clientId"],
-                token=token
-            )
-            
+
+            user.mono_client_id = client_info["clientId"]
+            user.mono_token = token
+
             await self._sync_accounts(user, client_info.get("accounts", []))
             
             await self._sync_jars(user, client_info.get("jars", []))

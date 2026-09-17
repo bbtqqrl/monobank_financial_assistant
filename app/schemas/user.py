@@ -1,13 +1,10 @@
-from pydantic import BaseModel
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict
 
 
 class UserResponse(BaseModel):
     id: int
-    mono_client_id: str
-    created_at: datetime
+    email: str
+    is_active: bool
+    mono_client_id: str | None = None
 
-    model_config = {
-        "from_attributes": True
-    }
-
+    model_config = ConfigDict(from_attributes=True)
