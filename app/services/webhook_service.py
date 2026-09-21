@@ -20,7 +20,7 @@ class MonobankWebhookService:
         self.transactions = TransactionRepository(db)
 
     async def process(self, payload: MonoWebhookPayload) -> TransactionRaw | None:
-        logger.info("Monobank webhook received: %s", payload)
+        logger.debug("Monobank webhook received: %s", payload)
 
         mono_id  = payload.data.account
         transaction = payload.data.statementItem
@@ -33,10 +33,10 @@ class MonobankWebhookService:
             logger.info("Transaction already exists: id=%s", transaction.id)
             return None
 
-        logger.info(
-            "Transaction received: id=%s, account=%s, description=%s, amount=%s, currency=%s",
+        logger.info("Transaction received: id=%s, account=%s", transaction.id, mono_id)
+        logger.debug(
+            "Transaction details: id=%s, description=%s, amount=%s, currency=%s",
             transaction.id,
-            mono_id ,
             transaction.description,
             transaction.amount,
             transaction.currencyCode,

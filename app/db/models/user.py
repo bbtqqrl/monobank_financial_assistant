@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.crypto import EncryptedString
 from app.db.base import Base
 
 
@@ -23,7 +24,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     mono_client_id: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
-    mono_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    mono_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
 
     accounts: Mapped[list["MonoAccount"]] = relationship(
         back_populates="user",

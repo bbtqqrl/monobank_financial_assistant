@@ -19,7 +19,7 @@ CONFIDENCE_THRESHOLD = 0.7
 
 class CategorizationService:
 
-    def __init__(self, db: AsyncSession, ai_client: CategorizationAIClient):
+    def __init__(self, db: AsyncSession, ai_client: CategorizationAIClient | None = None):
         self.db = db
         self.ai_client = ai_client
         self.transactions = TransactionRepository(db)
@@ -105,3 +105,36 @@ class CategorizationService:
     async def _get_mcc_name(self, mcc: int) -> str | None:
         result = await self.db.execute(select(MccCode.name).where(MccCode.code == mcc))
         return result.scalar_one_or_none()
+
+    async def apply_user_category(self, transaction_id: int, user_id: int, category_id: int):
+        transaction = await self.transactions.get_by_id_for_user(transaction_id, user_id)
+        if transaction is None:
+            return None
+
+        category = await self.categories.get_by_id(category_id)
+        if category is None:
+            raise ValueError("Category not found")
+
+        await self.transaction_categories.upsert(
+            transaction_id=transaction.id,
+            category_id=category.id,
+            source="user",
+        )
+
+        if transaction.mcc is not None:
+            merchant_key = build_merchant_key(transaction.description)
+            await self.mappings.upsert(
+                user_id=transaction.user_id,
+                merchant_key=merchant_key,
+                mcc=transaction.mcc,
+                category_id=category.id,
+                source="user",
+            )
+
+        await self.db.commit()
+        logger.info(
+            "Transaction category set by user id=%s category=%s",
+            transaction.id, category.slug,
+        )
+
+        return transaction

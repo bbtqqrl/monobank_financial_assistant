@@ -15,6 +15,10 @@ class CategoryRepository:
         result = await self.db.execute(select(Category).where(Category.slug == slug))
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, category_id: int) -> Optional[Category]:
+        result = await self.db.execute(select(Category).where(Category.id == category_id))
+        return result.scalar_one_or_none()
+
     async def get_leaf_categories(self) -> list[Category]:
         parent_ids = select(Category.parent_id).where(Category.parent_id.is_not(None)).distinct()
         result = await self.db.execute(

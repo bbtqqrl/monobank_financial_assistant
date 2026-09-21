@@ -18,6 +18,12 @@ class AccountRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def list_for_user(self, user_id: int) -> list[MonoAccount]:
+        result = await self.db.execute(
+            select(MonoAccount).where(MonoAccount.user_id == user_id)
+        )
+        return list(result.scalars().all())
     
     async def create(self, user: User, acc: dict) -> None:
         self.db.add(
