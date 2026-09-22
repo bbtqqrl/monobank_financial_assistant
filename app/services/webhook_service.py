@@ -27,10 +27,18 @@ class MonobankWebhookService:
         account_id = None
         jar_id = None
 
-        exists = await self.transactions.exists(transaction.id)
+        existing = await self.transactions.get_by_mono_id(transaction.id)
 
-        if exists:
-            logger.info("Transaction already exists: id=%s", transaction.id)
+        if existing is not None:
+            changed = await self.transactions.update_from_webhook(existing, transaction)
+            await self.db.commit()
+            if changed:
+                logger.info(
+                    "Transaction updated: id=%s hold=%s amount=%s",
+                    transaction.id, transaction.hold, transaction.amount,
+                )
+            else:
+                logger.info("Transaction already exists, no changes: id=%s", transaction.id)
             return None
 
         logger.info("Transaction received: id=%s, account=%s", transaction.id, mono_id)

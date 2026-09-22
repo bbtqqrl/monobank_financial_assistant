@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryBrief(BaseModel):
@@ -11,6 +11,7 @@ class CategoryBrief(BaseModel):
 
 class TransactionListItem(BaseModel):
     id: int
+    source: str
     time: int
     description: str
     amount: int
@@ -40,3 +41,14 @@ class TransactionListResponse(BaseModel):
 
 class UpdateTransactionCategoryRequest(BaseModel):
     category_id: int
+
+
+class CreateTransactionRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=500)
+    amount: int = Field(description="In minor units (kopecks). Negative = expense, positive = income.")
+    currency_code: int = 980
+    category_id: int | None = None
+    account_id: int | None = None
+    jar_id: int | None = None
+    time: int | None = Field(default=None, description="Unix seconds; defaults to now if omitted")
+    comment: str | None = Field(default=None, max_length=500)

@@ -24,6 +24,12 @@ class AccountRepository:
             select(MonoAccount).where(MonoAccount.user_id == user_id)
         )
         return list(result.scalars().all())
+
+    async def get_by_id_for_user(self, account_id: int, user_id: int) -> Optional[MonoAccount]:
+        result = await self.db.execute(
+            select(MonoAccount).where(MonoAccount.id == account_id, MonoAccount.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
     
     async def create(self, user: User, acc: dict) -> None:
         self.db.add(

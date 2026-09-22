@@ -10,3 +10,5 @@ pyjwt
 argon2-cffi
 pydantic[email]
 cryptography
+tzdata
+openai

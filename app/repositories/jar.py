@@ -15,6 +15,18 @@ class JarRepository:
             select(MonoJar).where(MonoJar.mono_jar_id == mono_jar_id)
         )
         return result.scalar_one_or_none()
+
+    async def list_for_user(self, user_id: int) -> list[MonoJar]:
+        result = await self.db.execute(
+            select(MonoJar).where(MonoJar.user_id == user_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id_for_user(self, jar_id: int, user_id: int) -> Optional[MonoJar]:
+        result = await self.db.execute(
+            select(MonoJar).where(MonoJar.id == jar_id, MonoJar.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
     
     async def create(self, user: User, jar: dict) -> None:
         self.db.add(

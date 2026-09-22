@@ -34,7 +34,9 @@ class TransactionRaw(Base):
         index=True,
     )
 
-    mono_transaction_id: Mapped[str] = mapped_column(String,unique=True,index=True,)
+    mono_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="monobank")
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)
@@ -56,7 +58,7 @@ class TransactionRaw(Base):
     counter_edrpou: Mapped[str | None] = mapped_column(String, nullable=True)
     counter_iban: Mapped[str | None] = mapped_column(String, nullable=True)
     counter_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    raw_json: Mapped[dict] = mapped_column(JSON)
+    raw_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     user: Mapped["User"] = relationship(
         back_populates="transactions",

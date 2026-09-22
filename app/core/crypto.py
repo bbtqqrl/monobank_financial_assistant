@@ -1,7 +1,11 @@
+import logging
+
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.types import String, TypeDecorator
 
 from app.core.config import MONO_TOKEN_ENCRYPTION_KEY
+
+logger = logging.getLogger(__name__)
 
 _fernet = Fernet(MONO_TOKEN_ENCRYPTION_KEY)
 
@@ -31,4 +35,8 @@ class EncryptedString(TypeDecorator):
         try:
             return decrypt_value(value)
         except InvalidToken:
+            logger.error(
+                "Failed to decrypt an EncryptedString value (wrong/rotated key or corrupted data); "
+                "treating column value as unset."
+            )
             return None

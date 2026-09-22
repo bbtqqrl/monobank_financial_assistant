@@ -14,6 +14,11 @@ MONO_TOKEN_ENCRYPTION_KEY = os.getenv("MONO_TOKEN_ENCRYPTION_KEY")
 
 MONO_WEBHOOK_VERIFY_SIGNATURE = os.getenv("MONO_WEBHOOK_VERIFY_SIGNATURE", "true").lower() == "true"
 
+# Optional: when unset, categorization falls back to MockCategorizationAIClient.
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
+
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set")
 if not JWT_SECRET_KEY:

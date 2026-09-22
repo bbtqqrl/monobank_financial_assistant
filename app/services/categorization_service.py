@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_THRESHOLD = 0.7
 
 
+class CategorizationAIError(Exception):
+    """Raised when the AI client itself fails (network/API error), as opposed
+    to succeeding with a low-confidence result."""
+
+
 class CategorizationService:
 
     def __init__(self, db: AsyncSession, ai_client: CategorizationAIClient | None = None):
@@ -60,14 +65,17 @@ class CategorizationService:
             for c in await self.categories.get_leaf_categories()
         ]
 
-        result = await self.ai_client.classify(
-            description=transaction.description,
-            mcc=transaction.mcc,
-            mcc_name=await self._get_mcc_name(transaction.mcc),
-            amount=transaction.amount,
-            counter_name=transaction.counter_name,
-            candidates=candidates,
-        )
+        try:
+            result = await self.ai_client.classify(
+                description=transaction.description,
+                mcc=transaction.mcc,
+                mcc_name=await self._get_mcc_name(transaction.mcc),
+                amount=transaction.amount,
+                counter_name=transaction.counter_name,
+                candidates=candidates,
+            )
+        except Exception as e:
+            raise CategorizationAIError(f"AI classify() failed for transaction id={transaction_id}") from e
 
         category = await self.categories.get_by_slug(result.category_slug)
         if category is None:
@@ -106,14 +114,29 @@ class CategorizationService:
         result = await self.db.execute(select(MccCode.name).where(MccCode.code == mcc))
         return result.scalar_one_or_none()
 
+    async def mark_categorization_failed(self, transaction_id: int) -> None:
+        """Last resort after retries are exhausted: flag the transaction for
+        manual review instead of leaving it silently uncategorized."""
+        category = await self.categories.get_unknown_category()
+        await self.transaction_categories.upsert(
+            transaction_id=transaction_id,
+            category_id=category.id,
+            source="ai_failed",
+        )
+        await self.db.commit()
+        logger.error(
+            "Transaction id=%s categorization permanently failed after retries; flagged for manual review",
+            transaction_id,
+        )
+
     async def apply_user_category(self, transaction_id: int, user_id: int, category_id: int):
         transaction = await self.transactions.get_by_id_for_user(transaction_id, user_id)
         if transaction is None:
             return None
 
-        category = await self.categories.get_by_id(category_id)
+        category = await self.categories.get_selectable_by_id(category_id)
         if category is None:
-            raise ValueError("Category not found")
+            raise ValueError("Category not found or not selectable")
 
         await self.transaction_categories.upsert(
             transaction_id=transaction.id,

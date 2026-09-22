@@ -21,6 +21,9 @@ class MonobankSyncService:
         try:
             client_info = await self.api.get_client_info(token)
 
+            if user.mono_client_id and user.mono_client_id != client_info["clientId"]:
+                await self._deactivate_previous_accounts(user)
+
             user.mono_client_id = client_info["clientId"]
             user.mono_token = token
 
@@ -40,6 +43,12 @@ class MonobankSyncService:
         finally:
             await self.api.close()
     
+    async def _deactivate_previous_accounts(self, user: User) -> None:
+        for account in await self.accounts.list_for_user(user.id):
+            account.is_active = False
+        for jar in await self.jars.list_for_user(user.id):
+            jar.is_active = False
+
     async def _sync_accounts(self, user: User, accounts: list[dict]) -> None:
         for acc in accounts:
             db_account = await self.accounts.get_by_mono_id(acc["id"])
