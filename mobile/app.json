@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Фінтрекер",
+    "slug": "fintracker",
+    "scheme": "fintracker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.fintracker.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleLocalizations": [
+          "uk",
+          "pl",
+          "en"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.fintracker.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Manrope-Regular.ttf",
+            "./assets/fonts/Manrope-Medium.ttf",
+            "./assets/fonts/Manrope-SemiBold.ttf",
+            "./assets/fonts/Manrope-Bold.ttf",
+            "./assets/fonts/Rubik-Medium.ttf",
+            "./assets/fonts/Rubik-SemiBold.ttf"
+          ]
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#EFEDE8",
+          "dark": {
+            "backgroundColor": "#141318"
+          }
+        }
+      ],
+      "expo-secure-store",
+      "expo-localization",
+      "./plugins/withSceneLifecycle"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
