@@ -3,16 +3,16 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
 
 import { FONT_FILES } from '@/lib/fonts';
+import { useTheme } from '@/theme';
 
 // keep the splash until fonts are ready
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const [loaded, error] = useFonts(FONT_FILES);
-  const dark = useColorScheme() === 'dark';
+  const { dark, c } = useTheme();
 
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync().catch(() => {});
@@ -26,7 +26,7 @@ export default function RootLayout() {
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: dark ? '#141318' : '#EFEDE8' },
+          contentStyle: { backgroundColor: c.bg },
         }}
       >
         <Stack.Screen name="(tabs)" />

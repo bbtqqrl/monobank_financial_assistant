@@ -1,18 +1,18 @@
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
 
 import { FONT } from '@/lib/fonts';
+import { useTheme } from '@/theme';
 
 // TODO: custom glass tab bar
 export default function TabsLayout() {
-  const dark = useColorScheme() === 'dark';
+  const { c } = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: dark ? '#F0EDE6' : '#1A1714',
-        tabBarInactiveTintColor: dark ? '#6F6B76' : '#A9A39A',
-        tabBarStyle: { backgroundColor: dark ? '#1B1A20' : '#FFFFFF' },
+        tabBarActiveTintColor: c.ink,
+        tabBarInactiveTintColor: c.ghost,
+        tabBarStyle: { backgroundColor: c.sheet },
         tabBarLabelStyle: { fontFamily: FONT.ui.medium, fontSize: 11 },
         tabBarIconStyle: { display: 'none' },
       }}
