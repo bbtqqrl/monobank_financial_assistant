@@ -8,7 +8,8 @@ export default function OverviewScreen() {
       links={[
         { label: 'Профіль', href: '/profile' },
         { label: 'Деталі транзакції (Сільпо)', href: '/transaction/silpo' },
-        { label: 'Перевірка Intl (dev)', href: '/dev/smoke' },
+        { label: 'Перевірки (dev)', href: '/dev/smoke' },
+        { label: 'Іконки й суми (dev)', href: '/dev/icons' },
       ]}
     />
   );

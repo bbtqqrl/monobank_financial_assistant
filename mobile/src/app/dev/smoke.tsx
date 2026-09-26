@@ -2,13 +2,14 @@ import { ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FONT } from '@/lib/fonts';
+import { formatMoney, PLN, UAH } from '@/lib/money';
 
-// dev screen: checks Hermes Intl for uk/pl/en + fonts
+// dev screen: Hermes Intl for uk/pl/en, money formatting, fonts
 
 type Check = { name: string; expected: string; actual: string };
 
 // ICU uses narrow/no-break spaces
-const NBSP = /[  ]/g;
+const NBSP = /[\u00A0\u202F]/g;
 
 function run(name: string, expected: string, fn: () => string): Check {
   let actual: string;
@@ -48,6 +49,13 @@ function checks(): Check[] {
       'продукти та супермаркети'.toLocaleUpperCase('uk')),
     run('Collator uk', 'Аптека,Бюджет,Ґудзик,Епіцентр,Їжа', () =>
       ['Їжа', 'Епіцентр', 'Ґудзик', 'Аптека', 'Бюджет'].sort(new Intl.Collator('uk').compare).join(',')),
+
+    run('money expense', '−526,40 ₴', () => formatMoney(-52640)),
+    run('money income', '+5 000,00 ₴', () => formatMoney(500000, UAH, { sign: 'always' })),
+    run('money whole', '18 740 ₴', () => formatMoney(1874000, UAH, { cents: false })),
+    run('money pl 4 digits', '−5000,00 zł', () => formatMoney(-500000, PLN, { locale: 'pl' })),
+    run('money pl 5 digits', '12 345,67 zł', () => formatMoney(1234567, PLN, { locale: 'pl' })),
+    run('money en', '−₴526.40', () => formatMoney(-52640, UAH, { locale: 'en' })),
   ];
 }
 
@@ -61,7 +69,7 @@ export default function SmokeScreen() {
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: dark ? '#141318' : '#EFEDE8' }]} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={[styles.title, { color: ink }]}>Intl check</Text>
+        <Text style={[styles.title, { color: ink }]}>Checks</Text>
         <Text style={[styles.summary, { color: failed.length ? '#C25A4E' : '#1F8A5F' }]}>
           {failed.length ? `${failed.length} of ${results.length} failed` : `All ${results.length} passed`} · {engine}
         </Text>

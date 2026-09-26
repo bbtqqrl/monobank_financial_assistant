@@ -33,6 +33,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile" />
         <Stack.Screen name="transaction/[id]" />
         <Stack.Screen name="dev/smoke" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="dev/icons" options={{ presentation: 'modal' }} />
       </Stack>
     </>
   );
