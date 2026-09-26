@@ -9,7 +9,7 @@ export default function OverviewScreen() {
         { label: 'Профіль', href: '/profile' },
         { label: 'Деталі транзакції (Сільпо)', href: '/transaction/silpo' },
         { label: 'Перевірки (dev)', href: '/dev/smoke' },
-        { label: 'Іконки й суми (dev)', href: '/dev/icons' },
+        { label: 'UI kit (dev)', href: '/dev/kit' },
       ]}
     />
   );
