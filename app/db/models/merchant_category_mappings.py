@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -43,6 +43,12 @@ class MerchantCategoryMapping(Base):
         nullable=False,
         default="AI",
     )
+
+    # Set when `source` traces back to an AI guess (confident or not), so a
+    # transaction picked up via this mapping can still be flagged for review
+    # instead of silently inheriting a shaky guess. Cleared once a human
+    # confirms the mapping (see update_category).
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(
         default=True,

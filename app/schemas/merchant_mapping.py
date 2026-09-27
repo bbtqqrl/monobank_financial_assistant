@@ -8,6 +8,7 @@ class MerchantMappingResponse(BaseModel):
     merchant_key: str
     mcc: int
     source: str
+    confidence: float | None
     is_active: bool
     category: CategoryBrief
 

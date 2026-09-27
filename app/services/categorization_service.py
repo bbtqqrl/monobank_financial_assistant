@@ -19,6 +19,8 @@ CONFIDENCE_THRESHOLD = 0.7
 
 JAR_MOVEMENT_CATEGORY_SLUG = "zaoshchadzhennia"
 TRANSFER_MCC_CATEGORY_SLUG = "perekazy"
+LOAN_DRAW_CATEGORY_SLUG = "kredyty"
+LOAN_REPAYMENT_CATEGORY_SLUG = "pohashennia-kredytu"
 
 
 class CategorizationAIError(Exception):
@@ -52,10 +54,16 @@ class CategorizationService:
             merchant_key = build_merchant_key(transaction.description)
             mapping = await self.mappings.get(transaction.user_id, merchant_key, transaction.mcc)
             if mapping is not None:
+                # A mapping learned from a low-confidence AI guess still gets
+                # used (so the same merchant doesn't keep re-triggering AI
+                # calls), but the transaction inherits that same low-confidence
+                # flag instead of silently looking "resolved".
+                mapping_unsure = mapping.confidence is not None and mapping.confidence < CONFIDENCE_THRESHOLD
                 self.transactions.set_category(
                     transaction,
                     category_id=mapping.category_id,
-                    source="mapping",
+                    source="mapping_low_confidence" if mapping_unsure else "mapping",
+                    confidence=mapping.confidence,
                     merchant_mapping_id=mapping.id,
                 )
                 await self._adjust_budget(transaction.user_id, mapping.category_id, transaction.amount, sign=1)
@@ -108,13 +116,14 @@ class CategorizationService:
         )
         await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
 
-        if is_confident and transaction.mcc is not None:
+        if transaction.mcc is not None:
             await self.mappings.upsert(
                 user_id=transaction.user_id,
                 merchant_key=merchant_key,
                 mcc=transaction.mcc,
                 category_id=category.id,
-                source="ai",
+                source=source,
+                confidence=result.confidence,
             )
 
         await self.db.commit()
@@ -164,6 +173,15 @@ class CategorizationService:
         if transaction.jar_id is not None:
             return JAR_MOVEMENT_CATEGORY_SLUG
         if transaction.mcc is None or transaction.mcc in TRANSFER_MCC_CODES:
+            # Monobank's own "Credit До завтра" product uses this same
+            # transfer MCC for both drawing and repaying the loan, so without
+            # this check every loan movement was getting lumped into generic
+            # "Перекази" instead of the dedicated loan categories.
+            description = (transaction.description or "").strip().lower()
+            if description.startswith("погашення"):
+                return LOAN_REPAYMENT_CATEGORY_SLUG
+            if description.startswith("кредит"):
+                return LOAN_DRAW_CATEGORY_SLUG
             return TRANSFER_MCC_CATEGORY_SLUG
         return None
 

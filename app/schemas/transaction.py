@@ -23,6 +23,7 @@ class TransactionListItem(BaseModel):
     transfer_pair_id: int | None
     category: CategoryBrief | None
     category_source: str | None
+    category_confidence: float | None
 
 
 class TransactionDetail(TransactionListItem):

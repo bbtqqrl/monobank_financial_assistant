@@ -48,6 +48,7 @@ class MerchantCategoryMappingRepository:
         mcc: int,
         category_id: int,
         source: str,
+        confidence: float | None = None,
     ) -> MerchantCategoryMapping:
         result = await self.db.execute(
             select(MerchantCategoryMapping).where(
@@ -61,6 +62,7 @@ class MerchantCategoryMappingRepository:
         if mapping:
             mapping.category_id = category_id
             mapping.source = source
+            mapping.confidence = confidence
             mapping.is_active = True
             return mapping
 
@@ -70,6 +72,7 @@ class MerchantCategoryMappingRepository:
             mcc=mcc,
             category_id=category_id,
             source=source,
+            confidence=confidence,
         )
         self.db.add(mapping)
         await self.db.flush()
@@ -79,6 +82,7 @@ class MerchantCategoryMappingRepository:
     def update_category(mapping: MerchantCategoryMapping, category_id: int) -> None:
         mapping.category_id = category_id
         mapping.source = "user"
+        mapping.confidence = None
 
     @staticmethod
     def deactivate(mapping: MerchantCategoryMapping) -> None:

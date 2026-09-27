@@ -47,6 +47,7 @@ def _to_list_item(transaction, category) -> TransactionListItem:
         transfer_pair_id=transaction.transfer_pair_id,
         category=_category_brief(category),
         category_source=transaction.category_source,
+        category_confidence=transaction.category_confidence,
     )
 
 

@@ -20,6 +20,7 @@ def _to_response(mapping: MerchantCategoryMapping, category: Category) -> Mercha
         merchant_key=mapping.merchant_key,
         mcc=mapping.mcc,
         source=mapping.source,
+        confidence=mapping.confidence,
         is_active=mapping.is_active,
         category=CategoryBrief.model_validate(category),
     )
