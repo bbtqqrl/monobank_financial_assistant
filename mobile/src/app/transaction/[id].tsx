@@ -6,6 +6,7 @@ export default function TransactionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   return (
     <Stub
+      background="green"
       title="Деталі транзакції"
       note={`id: ${id}`}
       links={[{ label: 'Назад на Огляд', href: '/' }]}

@@ -5,6 +5,7 @@ import { useTheme } from '@/theme';
 import { Amount } from '@/ui/Amount';
 import { Glass } from '@/ui/Glass';
 import { Icon, type IconName } from '@/ui/icons/Icon';
+import { Backdrop } from '@/ui/Backdrop';
 import { ICONS } from '@/ui/icons/paths';
 import { Text } from '@/ui/Text';
 
@@ -16,6 +17,7 @@ export default function KitScreen() {
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: c.bg }]} edges={['bottom']}>
+      <Backdrop variant="warm" />
       <ScrollView contentContainerStyle={styles.body}>
         <Text variant="screenTitle">Glass</Text>
         <Glass contentStyle={styles.card}>

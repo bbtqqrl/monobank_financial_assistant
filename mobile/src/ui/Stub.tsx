@@ -4,30 +4,36 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FONT } from '@/lib/fonts';
 import { TEXT, useTheme } from '@/theme';
+import { Backdrop, type BackdropVariant } from '@/ui/Backdrop';
 import { Text } from '@/ui/Text';
 
 type Props = {
   title: string;
   note?: string;
   links?: { label: string; href: Href }[];
+  // shared: transparent, the tabs layout draws the backdrop
+  background?: BackdropVariant | 'shared';
 };
 
 // TODO: placeholder, remove once real screens are in
-export function Stub({ title, note, links = [] }: Props) {
+export function Stub({ title, note, links = [], background = 'shared' }: Props) {
   const { c } = useTheme();
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: c.bg }]}>
-      <View style={styles.body}>
-        <Text style={styles.title}>{title}</Text>
-        {note ? <Text tone="faint">{note}</Text> : null}
-        {links.map((l) => (
-          <Link key={l.label} href={l.href} style={[TEXT.bodyStrong, styles.link, { color: c.accentText }]}>
-            {l.label} →
-          </Link>
-        ))}
-      </View>
-    </SafeAreaView>
+    <View style={styles.screen}>
+      {background !== 'shared' ? <Backdrop variant={background} /> : null}
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.body}>
+          <Text style={styles.title}>{title}</Text>
+          {note ? <Text tone="faint">{note}</Text> : null}
+          {links.map((l) => (
+            <Link key={l.label} href={l.href} style={[TEXT.bodyStrong, styles.link, { color: c.accentText }]}>
+              {l.label} →
+            </Link>
+          ))}
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
