@@ -33,6 +33,7 @@ from app.db.models import (
     MerchantCategoryMapping,
     MonoJar,
     MccCode,
+    Budget,
 )
 
 from app.db.session import DATABASE_URL

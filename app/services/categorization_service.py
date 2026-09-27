@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.mcc_codes import MccCode
+from app.repositories.budget import BudgetRepository
 from app.repositories.category import CategoryRepository
 from app.repositories.merchant_mapping import MerchantCategoryMappingRepository
 from app.repositories.transaction import TransactionRepository
@@ -33,6 +34,7 @@ class CategorizationService:
         self.transactions = TransactionRepository(db)
         self.categories = CategoryRepository(db)
         self.mappings = MerchantCategoryMappingRepository(db)
+        self.budgets = BudgetRepository(db)
 
     async def categorize(self, transaction_id: int) -> None:
         transaction = await self.transactions.get_by_id(transaction_id)
@@ -51,6 +53,7 @@ class CategorizationService:
                     source="mapping",
                     merchant_mapping_id=mapping.id,
                 )
+                await self._adjust_budget(transaction.user_id, mapping.category_id, transaction.amount, sign=1)
                 await self.db.commit()
                 logger.info(
                     "Transaction categorized from mapping id=%s category_id=%s",
@@ -98,6 +101,7 @@ class CategorizationService:
             source=source,
             confidence=result.confidence,
         )
+        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
 
         if is_confident and transaction.mcc is not None:
             await self.mappings.upsert(
@@ -113,6 +117,19 @@ class CategorizationService:
             "Transaction categorized via AI id=%s category=%s confidence=%.2f source=%s",
             transaction.id, category.slug, result.confidence, source,
         )
+
+    async def _adjust_budget(self, user_id: int, category_id: int | None, amount: int, sign: int) -> None:
+        """Only expenses (negative amount) count against a budget. `sign` is
+        +1 to add spend to a budget, -1 to reverse a previous contribution
+        (e.g. when a transaction is re-categorized)."""
+        if category_id is None or amount >= 0:
+            return
+
+        budget = await self.budgets.get_by_category_for_user(user_id, category_id)
+        if budget is None:
+            return
+
+        self.budgets.adjust_current_amount(budget, sign * -amount)
 
     async def _get_mcc_name(self, mcc: int | None) -> str | None:
         if mcc is None:
@@ -155,6 +172,7 @@ class CategorizationService:
             return
 
         self.transactions.set_category(transaction, category_id=category.id, source="rule")
+        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
         await self.db.commit()
         logger.info(
             "Transaction categorized by rule id=%s category=%s",
@@ -183,7 +201,11 @@ class CategorizationService:
         if category is None:
             raise ValueError("Category not found or not selectable")
 
+        old_category_id = transaction.category_id
+        await self._adjust_budget(transaction.user_id, old_category_id, transaction.amount, sign=-1)
+
         self.transactions.set_category(transaction, category_id=category.id, source="user")
+        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
 
         if transaction.mcc is not None:
             merchant_key = build_merchant_key(transaction.description)

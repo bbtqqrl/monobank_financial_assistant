@@ -8,6 +8,7 @@ from app.db.base import Base
 
 
 if TYPE_CHECKING:
+    from app.db.models.budget import Budget
     from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.mono_accounts import MonoAccount
     from app.db.models.mono_jars import MonoJar
@@ -47,6 +48,11 @@ class User(Base):
     )
 
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    budgets: Mapped[list["Budget"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
