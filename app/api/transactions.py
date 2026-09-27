@@ -54,6 +54,7 @@ async def list_transactions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     account_id: int | None = None,
+    jar_id: int | None = None,
     category_id: int | None = None,
     type: Literal["expense", "income", "transfer"] | None = None,
     date_from: date | None = Query(default=None, alias="from"),
@@ -69,6 +70,7 @@ async def list_transactions(
     rows, total = await transactions.list_for_user(
         user_id=current_user.id,
         account_id=account_id,
+        jar_id=jar_id,
         category_id=category_id,
         type_=type,
         date_from=ts_from,

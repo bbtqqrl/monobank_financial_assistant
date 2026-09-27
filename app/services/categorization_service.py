@@ -16,10 +16,6 @@ logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.7
 
-# Deterministic categorization rules, checked before falling back to AI.
-# A jar movement is always a "savings" operation regardless of MCC (or the
-# lack of one); a known transfer/cash MCC is always "perekazy" - neither
-# needs (or benefits from) an AI call, since there's no real merchant signal.
 JAR_MOVEMENT_CATEGORY_SLUG = "zaoshchadzhennia"
 TRANSFER_MCC_CATEGORY_SLUG = "perekazy"
 
@@ -45,8 +41,6 @@ class CategorizationService:
             logger.warning("Categorization skipped: transaction not found id=%s", transaction_id)
             return
 
-        # A learned merchant mapping only exists (and can only be looked up)
-        # keyed by MCC, so this is skippable when there isn't one.
         if transaction.mcc is not None:
             merchant_key = build_merchant_key(transaction.description)
             mapping = await self.mappings.get(transaction.user_id, merchant_key, transaction.mcc)
@@ -70,12 +64,9 @@ class CategorizationService:
             await self._apply_rule_category(transaction, rule_slug)
             return
 
-        # No merchant mapping, no deterministic rule - this is a real
-        # merchant purchase with a real MCC (the no-MCC case is already
-        # handled above), so it's worth an AI call.
         candidates = [
             CategorizationCandidate(slug=c.slug, name=c.name)
-            for c in await self.categories.get_leaf_categories()
+            for c in await self.categories.get_selectable_categories()
         ]
 
         try:
@@ -130,8 +121,6 @@ class CategorizationService:
         return result.scalar_one_or_none()
 
     async def _try_link_transfer_pair(self, transaction) -> None:
-        """Find the other leg of this internal transfer (mirrored amount,
-        close in time, not already linked) and link the two symmetrically."""
         candidate = await self.transactions.find_unpaired_transfer_candidate(
             user_id=transaction.user_id,
             amount=-transaction.amount,
@@ -152,10 +141,6 @@ class CategorizationService:
     def _determine_rule_category_slug(transaction) -> str | None:
         if transaction.jar_id is not None:
             return JAR_MOVEMENT_CATEGORY_SLUG
-        # No MCC at all is, in practice, never a real purchase - Monobank
-        # tags actual merchant purchases with an MCC. Treat it the same as a
-        # known transfer MCC rather than guessing with AI on a bare
-        # system-generated description.
         if transaction.mcc is None or transaction.mcc in TRANSFER_MCC_CODES:
             return TRANSFER_MCC_CATEGORY_SLUG
         return None
@@ -177,8 +162,6 @@ class CategorizationService:
         )
 
     async def mark_categorization_failed(self, transaction_id: int) -> None:
-        """Last resort after retries are exhausted: flag the transaction for
-        manual review instead of leaving it silently uncategorized."""
         transaction = await self.transactions.get_by_id(transaction_id)
         if transaction is None:
             return

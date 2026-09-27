@@ -13,8 +13,9 @@ Return JSON only:
 
 Rules:
 - category_slug MUST exactly match one of the provided category slugs.
-- confidence must reflect genuine certainty. Do not inflate it.
-- Use lower confidence when the merchant/description is ambiguous or meaningless.
+- Be decisive. If the merchant and the right category are clearly evident, use high
+  confidence (0.8-1.0) - don't hedge on obvious cases.
+- Only use low confidence when the merchant or category is genuinely unclear or ambiguous.
 - If no category is a clear fit, use "nevidome" with confidence around 0.0-0.2.
 - Always make the best available choice; do not use "nevidome" merely because MCC is missing.
 - Output ONLY the JSON object, with no explanation or markdown."""

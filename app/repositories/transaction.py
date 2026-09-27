@@ -46,6 +46,7 @@ class TransactionRepository:
         self,
         user_id: int,
         account_id: int | None = None,
+        jar_id: int | None = None,
         category_id: int | None = None,
         type_: Literal["expense", "income", "transfer"] | None = None,
         date_from: int | None = None,
@@ -58,11 +59,10 @@ class TransactionRepository:
 
         if account_id is not None:
             conditions.append(TransactionRaw.account_id == account_id)
+        if jar_id is not None:
+            conditions.append(TransactionRaw.jar_id == jar_id)
         if type_ in ("expense", "income"):
             conditions.append(TransactionRaw.amount < 0 if type_ == "expense" else TransactionRaw.amount > 0)
-            # No MCC is, in practice, never a real purchase (see
-            # CategorizationService) - exclude it here the same way a known
-            # transfer MCC is excluded, so it doesn't inflate totals.
             conditions.append(TransactionRaw.mcc.is_not(None))
             conditions.append(TransactionRaw.mcc.not_in(TRANSFER_MCC_CODES))
         elif type_ == "transfer":
@@ -101,8 +101,6 @@ class TransactionRepository:
         exclude_id: int,
         window_seconds: int = 5,
     ) -> Optional[TransactionRaw]:
-        """Find the other leg of an internal transfer: same user, mirrored
-        amount, close in time, not already linked to some other leg."""
         result = await self.db.execute(
             select(TransactionRaw)
             .where(
@@ -139,8 +137,6 @@ class TransactionRepository:
         return result.scalar_one_or_none()
 
     async def update_from_webhook(self, existing: TransactionRaw, transaction: MonoTransactionSchema) -> bool:
-        """Apply a re-delivered webhook (hold settling, amended amount/comment,
-        etc.) to an already-stored transaction. Returns whether anything changed."""
         changed = (
             existing.hold != transaction.hold
             or existing.amount != transaction.amount
