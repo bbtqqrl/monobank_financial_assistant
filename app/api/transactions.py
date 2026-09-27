@@ -31,7 +31,7 @@ def _category_brief(category) -> CategoryBrief | None:
     return CategoryBrief.model_validate(category) if category is not None else None
 
 
-def _to_list_item(transaction, category, source) -> TransactionListItem:
+def _to_list_item(transaction, category) -> TransactionListItem:
     return TransactionListItem(
         id=transaction.id,
         source=transaction.source,
@@ -43,8 +43,9 @@ def _to_list_item(transaction, category, source) -> TransactionListItem:
         mcc=transaction.mcc,
         account_id=transaction.account_id,
         jar_id=transaction.jar_id,
+        transfer_pair_id=transaction.transfer_pair_id,
         category=_category_brief(category),
-        category_source=source,
+        category_source=transaction.category_source,
     )
 
 
@@ -78,7 +79,7 @@ async def list_transactions(
     )
 
     return TransactionListResponse(
-        items=[_to_list_item(t, c, s) for t, c, s in rows],
+        items=[_to_list_item(t, c) for t, c in rows],
         page=page,
         limit=limit,
         total=total,
@@ -134,10 +135,10 @@ async def create_transaction(
         )
 
     row = await transactions.get_detail_for_user(transaction.id, current_user.id)
-    transaction, category, source = row
+    transaction, category = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category, source).model_dump(),
+        **_to_list_item(transaction, category).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,
@@ -158,10 +159,10 @@ async def get_transaction(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
-    transaction, category, source = row
+    transaction, category = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category, source).model_dump(),
+        **_to_list_item(transaction, category).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,
@@ -193,10 +194,10 @@ async def update_transaction_category(
 
     transactions = TransactionRepository(db)
     row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category, source = row
+    transaction, category = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category, source).model_dump(),
+        **_to_list_item(transaction, category).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,

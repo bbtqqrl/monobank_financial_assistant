@@ -30,7 +30,6 @@ from app.db.models import (
     TransactionRaw,
     User,
     Category,
-    TransactionCategory,
     MerchantCategoryMapping,
     MonoJar,
     MccCode,

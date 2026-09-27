@@ -20,6 +20,7 @@ class TransactionListItem(BaseModel):
     mcc: int | None
     account_id: int | None
     jar_id: int | None
+    transfer_pair_id: int | None
     category: CategoryBrief | None
     category_source: str | None
 

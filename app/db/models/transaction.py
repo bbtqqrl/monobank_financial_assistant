@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, BigInteger, ForeignKey, Integer, String, Text, Boolean
+from sqlalchemy import JSON, BigInteger, Float, ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -7,9 +7,10 @@ from app.db.base import Base
 
 
 if TYPE_CHECKING:
+    from app.db.models.categories import Category
+    from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.mono_accounts import MonoAccount
     from app.db.models.mono_jars import MonoJar
-    from app.db.models.transaction_categories import TransactionCategory
     from app.db.models.user import User
 
 class TransactionRaw(Base):
@@ -34,9 +35,28 @@ class TransactionRaw(Base):
         index=True,
     )
 
+    transfer_pair_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     mono_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
 
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="monobank")
+
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    category_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    category_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    merchant_mapping_id: Mapped[int | None] = mapped_column(
+        ForeignKey("merchant_category_mappings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)
@@ -72,8 +92,10 @@ class TransactionRaw(Base):
         back_populates="transactions",
     )
 
-    category: Mapped["TransactionCategory | None"] = relationship(
-        back_populates="transaction",
-        uselist=False,
-        cascade="all, delete-orphan",
+    category: Mapped["Category | None"] = relationship(
+        back_populates="transactions",
+    )
+
+    merchant_mapping: Mapped["MerchantCategoryMapping | None"] = relationship(
+        back_populates="transactions",
     )

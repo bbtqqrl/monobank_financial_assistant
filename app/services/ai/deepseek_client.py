@@ -19,13 +19,13 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
     async def classify(
         self,
         description: str,
-        mcc: int,
+        mcc: int | None,
         mcc_name: str | None,
         amount: int,
         counter_name: str | None,
         candidates: list[CategorizationCandidate],
     ) -> CategorizationResult:
-        user_prompt = build_user_prompt(description, mcc, mcc_name, amount, counter_name, candidates)
+        user_prompt = build_user_prompt(description, mcc_name, amount, counter_name, candidates)
 
         response = await self._client.chat.completions.create(
             model=DEEPSEEK_MODEL,
@@ -34,8 +34,9 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
-            max_tokens=200,
+            max_tokens=300,
             temperature=0,
+            extra_body={"thinking": {"type": "disabled"}},
         )
 
         content = response.choices[0].message.content

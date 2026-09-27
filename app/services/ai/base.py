@@ -9,7 +9,7 @@ class CategorizationAIClient(ABC):
     async def classify(
         self,
         description: str,
-        mcc: int,
+        mcc: int | None,
         mcc_name: str | None,
         amount: int,
         counter_name: str | None,

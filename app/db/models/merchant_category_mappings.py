@@ -8,7 +8,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.categories import Category
-    from app.db.models.transaction_categories import TransactionCategory
+    from app.db.models.transaction import TransactionRaw
     from app.db.models.user import User
 
 class MerchantCategoryMapping(Base):
@@ -57,7 +57,7 @@ class MerchantCategoryMapping(Base):
         back_populates="merchant_mappings",
     )
 
-    transaction_categories: Mapped[list["TransactionCategory"]] = relationship(
+    transactions: Mapped[list["TransactionRaw"]] = relationship(
         back_populates="merchant_mapping",
     )
 

@@ -5,14 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
 from app.db.models.transaction import TransactionRaw
-from app.db.models.transaction_categories import TransactionCategory
 from app.schemas.monobank import MonoTransactionSchema
-
-# MCC codes that represent money movement between the user's own means
-# (card-to-card transfers, cash withdrawals, account top-ups) rather than an
-# actual expense or income - excluded from expense/income filters so they
-# don't inflate those totals, and selectable via type="transfer".
-TRANSFER_MCC_CODES = {4829, 6010, 6011, 6050, 6051, 6532, 6533, 6536, 6537, 6538, 6540}
+from app.services.transfer_mcc import TRANSFER_MCC_CODES
 
 
 class TransactionRepository:
@@ -39,11 +33,10 @@ class TransactionRepository:
 
     async def get_detail_for_user(
         self, transaction_id: int, user_id: int
-    ) -> Optional[tuple[TransactionRaw, Optional[Category], Optional[str]]]:
+    ) -> Optional[tuple[TransactionRaw, Optional[Category]]]:
         result = await self.db.execute(
-            select(TransactionRaw, Category, TransactionCategory.source)
-            .join(TransactionCategory, TransactionCategory.transaction_id == TransactionRaw.id, isouter=True)
-            .join(Category, Category.id == TransactionCategory.category_id, isouter=True)
+            select(TransactionRaw, Category)
+            .join(Category, Category.id == TransactionRaw.category_id, isouter=True)
             .where(TransactionRaw.id == transaction_id, TransactionRaw.user_id == user_id)
         )
 
@@ -60,16 +53,20 @@ class TransactionRepository:
         search: str | None = None,
         page: int = 1,
         limit: int = 30,
-    ) -> tuple[list[tuple[TransactionRaw, Optional[Category], Optional[str]]], int]:
+    ) -> tuple[list[tuple[TransactionRaw, Optional[Category]]], int]:
         conditions = [TransactionRaw.user_id == user_id]
 
         if account_id is not None:
             conditions.append(TransactionRaw.account_id == account_id)
         if type_ in ("expense", "income"):
             conditions.append(TransactionRaw.amount < 0 if type_ == "expense" else TransactionRaw.amount > 0)
-            conditions.append(or_(TransactionRaw.mcc.is_(None), TransactionRaw.mcc.not_in(TRANSFER_MCC_CODES)))
+            # No MCC is, in practice, never a real purchase (see
+            # CategorizationService) - exclude it here the same way a known
+            # transfer MCC is excluded, so it doesn't inflate totals.
+            conditions.append(TransactionRaw.mcc.is_not(None))
+            conditions.append(TransactionRaw.mcc.not_in(TRANSFER_MCC_CODES))
         elif type_ == "transfer":
-            conditions.append(TransactionRaw.mcc.in_(TRANSFER_MCC_CODES))
+            conditions.append(or_(TransactionRaw.mcc.is_(None), TransactionRaw.mcc.in_(TRANSFER_MCC_CODES)))
         if date_from is not None:
             conditions.append(TransactionRaw.time >= date_from)
         if date_to is not None:
@@ -77,12 +74,11 @@ class TransactionRepository:
         if search:
             conditions.append(TransactionRaw.description.ilike(f"%{search}%"))
         if category_id is not None:
-            conditions.append(TransactionCategory.category_id == category_id)
+            conditions.append(TransactionRaw.category_id == category_id)
 
         base = (
-            select(TransactionRaw, Category, TransactionCategory.source)
-            .join(TransactionCategory, TransactionCategory.transaction_id == TransactionRaw.id, isouter=True)
-            .join(Category, Category.id == TransactionCategory.category_id, isouter=True)
+            select(TransactionRaw, Category)
+            .join(Category, Category.id == TransactionRaw.category_id, isouter=True)
             .where(*conditions)
         )
 
@@ -96,6 +92,42 @@ class TransactionRepository:
         )
 
         return list(result.all()), total
+
+    async def find_unpaired_transfer_candidate(
+        self,
+        user_id: int,
+        amount: int,
+        time: int,
+        exclude_id: int,
+        window_seconds: int = 5,
+    ) -> Optional[TransactionRaw]:
+        """Find the other leg of an internal transfer: same user, mirrored
+        amount, close in time, not already linked to some other leg."""
+        result = await self.db.execute(
+            select(TransactionRaw)
+            .where(
+                TransactionRaw.user_id == user_id,
+                TransactionRaw.id != exclude_id,
+                TransactionRaw.amount == amount,
+                TransactionRaw.transfer_pair_id.is_(None),
+                TransactionRaw.time.between(time - window_seconds, time + window_seconds),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def set_category(
+        transaction: TransactionRaw,
+        category_id: int,
+        source: str,
+        confidence: float | None = None,
+        merchant_mapping_id: int | None = None,
+    ) -> None:
+        transaction.category_id = category_id
+        transaction.category_source = source
+        transaction.category_confidence = confidence
+        transaction.merchant_mapping_id = merchant_mapping_id
 
     async def get_by_mono_id(self, mono_transaction_id: str) -> Optional[TransactionRaw]:
         result = await self.db.execute(
