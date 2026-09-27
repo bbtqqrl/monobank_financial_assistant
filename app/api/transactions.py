@@ -18,9 +18,10 @@ from app.schemas.transaction import (
     TransactionDetail,
     TransactionListItem,
     TransactionListResponse,
+    UpdateManualTransactionRequest,
     UpdateTransactionCategoryRequest,
 )
-from app.services.categorization_service import CategorizationService
+from app.services.categorization_service import CategorizationService, NotManualTransactionError
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -171,6 +172,70 @@ async def get_transaction(
         counter_edrpou=transaction.counter_edrpou,
         counter_iban=transaction.counter_iban,
     )
+
+
+@router.patch("/{transaction_id}", response_model=TransactionDetail)
+async def update_manual_transaction(
+    transaction_id: int,
+    data: UpdateManualTransactionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CategorizationService(db)
+
+    try:
+        transaction = await service.edit_manual_transaction(
+            transaction_id=transaction_id,
+            user_id=current_user.id,
+            description=data.description,
+            amount=data.amount,
+            category_id=data.category_id,
+            comment=data.comment,
+            time=data.time,
+        )
+    except NotManualTransactionError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only manually created transactions can be edited",
+        )
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found")
+
+    if transaction is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+
+    transactions = TransactionRepository(db)
+    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
+    transaction, category = row
+
+    return TransactionDetail(
+        **_to_list_item(transaction, category).model_dump(),
+        balance=transaction.balance,
+        comment=transaction.comment,
+        counter_name=transaction.counter_name,
+        counter_edrpou=transaction.counter_edrpou,
+        counter_iban=transaction.counter_iban,
+    )
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_manual_transaction(
+    transaction_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CategorizationService(db)
+
+    try:
+        deleted = await service.delete_manual_transaction(transaction_id, current_user.id)
+    except NotManualTransactionError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only manually created transactions can be deleted",
+        )
+
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
 
 @router.patch("/{transaction_id}/category", response_model=TransactionDetail)

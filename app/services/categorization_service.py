@@ -26,6 +26,11 @@ class CategorizationAIError(Exception):
     to succeeding with a low-confidence result."""
 
 
+class NotManualTransactionError(Exception):
+    """Raised when editing/deleting is attempted on a Monobank-synced
+    transaction, which must stay a faithful copy of the bank's record."""
+
+
 class CategorizationService:
 
     def __init__(self, db: AsyncSession, ai_client: CategorizationAIClient | None = None):
@@ -224,3 +229,62 @@ class CategorizationService:
         )
 
         return transaction
+
+    async def edit_manual_transaction(
+        self,
+        transaction_id: int,
+        user_id: int,
+        description: str | None = None,
+        amount: int | None = None,
+        category_id: int | None = None,
+        comment: str | None = None,
+        time: int | None = None,
+    ):
+        transaction = await self.transactions.get_by_id_for_user(transaction_id, user_id)
+        if transaction is None:
+            return None
+
+        if transaction.source != "manual":
+            raise NotManualTransactionError("Only manually created transactions can be edited")
+
+        category = None
+        if category_id is not None:
+            category = await self.categories.get_selectable_by_id(category_id)
+            if category is None:
+                raise ValueError("Category not found or not selectable")
+
+        # Amount and/or category can both change in the same request, so the
+        # budget is always reversed against the old (category, amount) pair
+        # first, then reapplied against whatever the new pair ends up being.
+        budget_recalc_needed = amount is not None or category is not None
+        if budget_recalc_needed:
+            await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=-1)
+
+        self.transactions.update_manual_fields(
+            transaction, description=description, amount=amount, comment=comment, time=time,
+        )
+        if category is not None:
+            self.transactions.set_category(transaction, category_id=category.id, source="user")
+
+        if budget_recalc_needed:
+            await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=1)
+
+        await self.db.commit()
+        logger.info("Manual transaction edited id=%s", transaction.id)
+
+        return transaction
+
+    async def delete_manual_transaction(self, transaction_id: int, user_id: int) -> bool:
+        transaction = await self.transactions.get_by_id_for_user(transaction_id, user_id)
+        if transaction is None:
+            return False
+
+        if transaction.source != "manual":
+            raise NotManualTransactionError("Only manually created transactions can be deleted")
+
+        await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=-1)
+        await self.transactions.delete(transaction)
+        await self.db.commit()
+        logger.info("Manual transaction deleted id=%s", transaction_id)
+
+        return True

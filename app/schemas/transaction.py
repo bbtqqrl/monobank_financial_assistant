@@ -53,3 +53,11 @@ class CreateTransactionRequest(BaseModel):
     jar_id: int | None = None
     time: int | None = Field(default=None, description="Unix seconds; defaults to now if omitted")
     comment: str | None = Field(default=None, max_length=500)
+
+
+class UpdateManualTransactionRequest(BaseModel):
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    amount: int | None = Field(default=None, description="In minor units (kopecks). Negative = expense, positive = income.")
+    category_id: int | None = None
+    time: int | None = None
+    comment: str | None = Field(default=None, max_length=500)

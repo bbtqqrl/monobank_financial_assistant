@@ -32,7 +32,18 @@ class MonobankAPIClient:
         )
         r.raise_for_status()
         return r.json()
-    
+
+    async def get_statement(
+        self, token: str, account_id: str, from_ts: int, to_ts: Optional[int] = None,
+    ) -> list[dict]:
+        client = await self._get_client()
+        url = f"{self.BASE_URL}/personal/statement/{account_id}/{from_ts}"
+        if to_ts is not None:
+            url += f"/{to_ts}"
+        r = await client.get(url, headers={"X-Token": token})
+        r.raise_for_status()
+        return r.json()
+
     async def close(self):
         if self._client:
             await self._client.aclose()

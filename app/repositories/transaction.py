@@ -115,6 +115,27 @@ class TransactionRepository:
         return result.scalar_one_or_none()
 
     @staticmethod
+    def update_manual_fields(
+        transaction: TransactionRaw,
+        description: str | None = None,
+        amount: int | None = None,
+        comment: str | None = None,
+        time: int | None = None,
+    ) -> None:
+        if description is not None:
+            transaction.description = description
+        if amount is not None:
+            transaction.amount = amount
+            transaction.operation_amount = amount
+        if comment is not None:
+            transaction.comment = comment
+        if time is not None:
+            transaction.time = time
+
+    async def delete(self, transaction: TransactionRaw) -> None:
+        await self.db.delete(transaction)
+
+    @staticmethod
     def set_category(
         transaction: TransactionRaw,
         category_id: int,
