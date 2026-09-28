@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
@@ -30,7 +31,22 @@ class AccountRepository:
             select(MonoAccount).where(MonoAccount.id == account_id, MonoAccount.user_id == user_id)
         )
         return result.scalar_one_or_none()
-    
+
+    async def list_pending_backfill(self) -> list[MonoAccount]:
+        """Active accounts whose initial statement backfill never completed
+        (e.g. the process restarted mid-way) - used to resume on startup."""
+        result = await self.db.execute(
+            select(MonoAccount).where(
+                MonoAccount.is_active.is_(True),
+                MonoAccount.statement_backfilled_at.is_(None),
+            )
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    def mark_backfilled(account: MonoAccount, when: datetime) -> None:
+        account.statement_backfilled_at = when
+
     async def create(self, user: User, acc: dict) -> None:
         self.db.add(
             MonoAccount(

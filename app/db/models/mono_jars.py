@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, BigInteger
+from sqlalchemy import DateTime, ForeignKey, Integer, String, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -26,6 +27,8 @@ class MonoJar(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     currency_code: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(default=True)
+
+    statement_backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(
         back_populates="jars",

@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -34,6 +35,11 @@ class MonoAccount(Base):
     account_type: Mapped[str] = mapped_column(String)
     iban: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Set once the initial 30-day statement backfill for this account has
+    # completed, so a restart mid-backfill can resume instead of starting
+    # over (see StatementBackfillService).
+    statement_backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(
         back_populates="accounts",

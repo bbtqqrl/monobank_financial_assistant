@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import SessionLocal
 from app.repositories.account import AccountRepository
 from app.repositories.jar import JarRepository
 from app.repositories.transaction import TransactionRepository
@@ -16,12 +17,10 @@ logger = logging.getLogger(__name__)
 
 BACKFILL_DAYS = 30
 STATEMENT_RATE_LIMIT_SECONDS = 60
+AI_CONCURRENCY = 8
 
 
 class StatementBackfillService:
-    """Pulls the last BACKFILL_DAYS of Monobank history for a newly
-    connected user, so they see real data instead of an empty screen."""
-
     def __init__(self, db: AsyncSession):
         self.db = db
         self.api = MonobankAPIClient()
@@ -30,15 +29,15 @@ class StatementBackfillService:
         self.transactions = TransactionRepository(db)
 
     async def backfill(self, user_id: int, token: str) -> None:
-        accounts = [a for a in await self.accounts.list_for_user(user_id) if a.is_active]
-        jars = [j for j in await self.jars.list_for_user(user_id) if j.is_active]
-
-        # (internal account_id, internal jar_id, Monobank's own id for the API call)
-        targets = (
-            [(account.id, None, account.mono_account_id) for account in accounts]
-            + [(None, jar.id, jar.mono_jar_id) for jar in jars]
-        )
-        if not targets:
+        accounts = [
+            a for a in await self.accounts.list_for_user(user_id)
+            if a.is_active and a.statement_backfilled_at is None
+        ]
+        jars = [
+            j for j in await self.jars.list_for_user(user_id)
+            if j.is_active and j.statement_backfilled_at is None
+        ]
+        if not accounts and not jars:
             return
 
         to_ts = int(datetime.now(timezone.utc).timestamp())
@@ -46,36 +45,60 @@ class StatementBackfillService:
 
         created_ids: list[int] = []
         try:
-            for i, (account_id, jar_id, mono_id) in enumerate(targets):
-                # Monobank allows this endpoint at most once every 60 seconds,
-                # regardless of which account/jar it's called for.
-                if i > 0:
+            first = True
+            for account in accounts:
+                if not first:
                     await asyncio.sleep(STATEMENT_RATE_LIMIT_SECONDS)
-                created_ids += await self._backfill_one(
-                    user_id, token, account_id, jar_id, mono_id, from_ts, to_ts,
-                )
+                first = False
+                created_ids += await self._backfill_account(user_id, token, account, from_ts, to_ts)
+
+            for jar in jars:
+                if not first:
+                    await asyncio.sleep(STATEMENT_RATE_LIMIT_SECONDS)
+                first = False
+                created_ids += await self._backfill_jar(user_id, token, jar, from_ts, to_ts)
         finally:
             await self.api.close()
 
         await self._categorize_all(created_ids)
 
-    async def _backfill_one(
+    async def _backfill_account(self, user_id: int, token: str, account, from_ts: int, to_ts: int) -> list[int]:
+        created_ids = await self._fetch_and_store(
+            user_id, token, account.mono_account_id, from_ts, to_ts,
+            account_id=account.id, jar_id=None,
+        )
+        if created_ids is not None:
+            self.accounts.mark_backfilled(account, datetime.now(timezone.utc))
+            await self.db.commit()
+        return created_ids or []
+
+    async def _backfill_jar(self, user_id: int, token: str, jar, from_ts: int, to_ts: int) -> list[int]:
+        created_ids = await self._fetch_and_store(
+            user_id, token, jar.mono_jar_id, from_ts, to_ts,
+            account_id=None, jar_id=jar.id,
+        )
+        if created_ids is not None:
+            self.jars.mark_backfilled(jar, datetime.now(timezone.utc))
+            await self.db.commit()
+        return created_ids or []
+
+    async def _fetch_and_store(
         self,
         user_id: int,
         token: str,
-        account_id: int | None,
-        jar_id: int | None,
         mono_id: str,
         from_ts: int,
         to_ts: int,
-    ) -> list[int]:
+        account_id: int | None,
+        jar_id: int | None,
+    ) -> list[int] | None:
         try:
             items = await self.api.get_statement(token, mono_id, from_ts, to_ts)
         except Exception:
             logger.exception(
                 "Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id,
             )
-            return []
+            return None
 
         created_ids = []
         for raw in items:
@@ -94,13 +117,22 @@ class StatementBackfillService:
         return created_ids
 
     async def _categorize_all(self, transaction_ids: list[int]) -> None:
-        service = CategorizationService(self.db, get_categorization_ai_client())
-        for transaction_id in transaction_ids:
-            try:
-                await service.categorize(transaction_id)
-            except CategorizationAIError:
-                logger.warning(
-                    "Backfill categorization failed for transaction id=%s, flagging for manual review",
-                    transaction_id, exc_info=True,
-                )
-                await service.mark_categorization_failed(transaction_id)
+        semaphore = asyncio.Semaphore(AI_CONCURRENCY)
+
+        async def _categorize_one(transaction_id: int) -> None:
+            async with semaphore, SessionLocal() as db:
+                service = CategorizationService(db, get_categorization_ai_client())
+                try:
+                    await service.categorize(transaction_id)
+                except CategorizationAIError:
+                    logger.warning(
+                        "Backfill categorization failed for transaction id=%s, flagging for manual review",
+                        transaction_id, exc_info=True,
+                    )
+                    await service.mark_categorization_failed(transaction_id)
+                except Exception:
+                    logger.exception(
+                        "Unexpected error categorizing transaction id=%s during backfill", transaction_id,
+                    )
+
+        await asyncio.gather(*(_categorize_one(tid) for tid in transaction_ids))
