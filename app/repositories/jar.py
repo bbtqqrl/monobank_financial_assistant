@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
@@ -27,7 +28,20 @@ class JarRepository:
             select(MonoJar).where(MonoJar.id == jar_id, MonoJar.user_id == user_id)
         )
         return result.scalar_one_or_none()
-    
+
+    async def list_pending_backfill(self) -> list[MonoJar]:
+        result = await self.db.execute(
+            select(MonoJar).where(
+                MonoJar.is_active.is_(True),
+                MonoJar.statement_backfilled_at.is_(None),
+            )
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    def mark_backfilled(jar: MonoJar, when: datetime) -> None:
+        jar.statement_backfilled_at = when
+
     async def create(self, user: User, jar: dict) -> None:
         self.db.add(
             MonoJar(
