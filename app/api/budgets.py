@@ -7,7 +7,7 @@ from app.db.models.budget import Budget
 from app.db.models.categories import Category
 from app.db.models.user import User
 from app.db.session import get_db
-from app.repositories.budget import BudgetRepository
+from app.repositories.budget import BudgetRepository, current_period
 from app.repositories.category import CategoryRepository
 from app.schemas.budget import BudgetResponse, CreateBudgetRequest, UpdateBudgetRequest
 from app.schemas.transaction import CategoryBrief
@@ -15,14 +15,21 @@ from app.schemas.transaction import CategoryBrief
 router = APIRouter(prefix="/budgets", tags=["Budgets"])
 
 
-def _to_response(budget: Budget, category: Category) -> BudgetResponse:
-    return BudgetResponse(
-        id=budget.id,
-        category=CategoryBrief.model_validate(category),
-        amount=budget.amount,
-        current_amount=budget.current_amount,
-        period_start=budget.period_start,
-    )
+async def _to_responses(
+    repo: BudgetRepository, user_id: int, rows: list[tuple[Budget, Category]],
+) -> list[BudgetResponse]:
+    period_start, from_ts, to_ts = current_period()
+    spent = await repo.spent_by_category(user_id, [budget.category_id for budget, _ in rows], from_ts, to_ts)
+    return [
+        BudgetResponse(
+            id=budget.id,
+            category=CategoryBrief.model_validate(category),
+            amount=budget.amount,
+            current_amount=spent.get(budget.category_id, 0),
+            period_start=period_start,
+        )
+        for budget, category in rows
+    ]
 
 
 @router.get("", response_model=list[BudgetResponse])
@@ -32,7 +39,7 @@ async def list_budgets(
 ):
     repo = BudgetRepository(db)
     rows = await repo.list_for_user(current_user.id)
-    return [_to_response(budget, category) for budget, category in rows]
+    return await _to_responses(repo, current_user.id, rows)
 
 
 @router.post("", response_model=BudgetResponse, status_code=status.HTTP_201_CREATED)
@@ -53,7 +60,8 @@ async def create_budget(
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Budget for this category already exists")
 
-    return _to_response(budget, category)
+    [response] = await _to_responses(repo, current_user.id, [(budget, category)])
+    return response
 
 
 @router.patch("/{budget_id}", response_model=BudgetResponse)
@@ -72,7 +80,8 @@ async def update_budget(
     await db.commit()
 
     category = await CategoryRepository(db).get_by_id(budget.category_id)
-    return _to_response(budget, category)
+    [response] = await _to_responses(repo, current_user.id, [(budget, category)])
+    return response
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)

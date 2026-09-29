@@ -4,7 +4,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.mcc_codes import MccCode
-from app.repositories.budget import BudgetRepository
 from app.repositories.category import CategoryRepository
 from app.repositories.merchant_mapping import MerchantCategoryMappingRepository
 from app.repositories.transaction import TransactionRepository
@@ -41,13 +40,19 @@ class CategorizationService:
         self.transactions = TransactionRepository(db)
         self.categories = CategoryRepository(db)
         self.mappings = MerchantCategoryMappingRepository(db)
-        self.budgets = BudgetRepository(db)
 
     async def categorize(self, transaction_id: int) -> None:
-        transaction = await self.transactions.get_by_id(transaction_id)
+        # Row lock: the webhook path, backfill and the sweeper can all reach
+        # the same transaction; whoever gets here second skips it.
+        transaction = await self.transactions.get_for_categorization(transaction_id)
 
         if transaction is None:
-            logger.warning("Categorization skipped: transaction not found id=%s", transaction_id)
+            logger.info("Categorization skipped: transaction id=%s missing or being categorized", transaction_id)
+            return
+
+        if transaction.category_id is not None:
+            await self.db.rollback()
+            logger.info("Categorization skipped: transaction id=%s already categorized", transaction_id)
             return
 
         if transaction.mcc is not None:
@@ -66,7 +71,6 @@ class CategorizationService:
                     confidence=mapping.confidence,
                     merchant_mapping_id=mapping.id,
                 )
-                await self._adjust_budget(transaction.user_id, mapping.category_id, transaction.amount, sign=1)
                 await self.db.commit()
                 logger.info(
                     "Transaction categorized from mapping id=%s category_id=%s",
@@ -114,7 +118,6 @@ class CategorizationService:
             source=source,
             confidence=result.confidence,
         )
-        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
 
         if transaction.mcc is not None:
             await self.mappings.upsert(
@@ -131,19 +134,6 @@ class CategorizationService:
             "Transaction categorized via AI id=%s category=%s confidence=%.2f source=%s",
             transaction.id, category.slug, result.confidence, source,
         )
-
-    async def _adjust_budget(self, user_id: int, category_id: int | None, amount: int, sign: int) -> None:
-        """Only expenses (negative amount) count against a budget. `sign` is
-        +1 to add spend to a budget, -1 to reverse a previous contribution
-        (e.g. when a transaction is re-categorized)."""
-        if category_id is None or amount >= 0:
-            return
-
-        budget = await self.budgets.get_by_category_for_user(user_id, category_id)
-        if budget is None:
-            return
-
-        self.budgets.adjust_current_amount(budget, sign * -amount)
 
     async def _get_mcc_name(self, mcc: int | None) -> str | None:
         if mcc is None:
@@ -195,7 +185,6 @@ class CategorizationService:
             return
 
         self.transactions.set_category(transaction, category_id=category.id, source="rule")
-        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
         await self.db.commit()
         logger.info(
             "Transaction categorized by rule id=%s category=%s",
@@ -203,8 +192,10 @@ class CategorizationService:
         )
 
     async def mark_categorization_failed(self, transaction_id: int) -> None:
+        # Session may be mid-way through a failed categorize(); start clean.
+        await self.db.rollback()
         transaction = await self.transactions.get_by_id(transaction_id)
-        if transaction is None:
+        if transaction is None or transaction.category_id is not None:
             return
 
         category = await self.categories.get_unknown_category()
@@ -224,11 +215,7 @@ class CategorizationService:
         if category is None:
             raise ValueError("Category not found or not selectable")
 
-        old_category_id = transaction.category_id
-        await self._adjust_budget(transaction.user_id, old_category_id, transaction.amount, sign=-1)
-
         self.transactions.set_category(transaction, category_id=category.id, source="user")
-        await self._adjust_budget(transaction.user_id, category.id, transaction.amount, sign=1)
 
         if transaction.mcc is not None:
             merchant_key = build_merchant_key(transaction.description)
@@ -271,21 +258,11 @@ class CategorizationService:
             if category is None:
                 raise ValueError("Category not found or not selectable")
 
-        # Amount and/or category can both change in the same request, so the
-        # budget is always reversed against the old (category, amount) pair
-        # first, then reapplied against whatever the new pair ends up being.
-        budget_recalc_needed = amount is not None or category is not None
-        if budget_recalc_needed:
-            await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=-1)
-
         self.transactions.update_manual_fields(
             transaction, description=description, amount=amount, comment=comment, time=time,
         )
         if category is not None:
             self.transactions.set_category(transaction, category_id=category.id, source="user")
-
-        if budget_recalc_needed:
-            await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=1)
 
         await self.db.commit()
         logger.info("Manual transaction edited id=%s", transaction.id)
@@ -300,7 +277,6 @@ class CategorizationService:
         if transaction.source != "manual":
             raise NotManualTransactionError("Only manually created transactions can be deleted")
 
-        await self._adjust_budget(user_id, transaction.category_id, transaction.amount, sign=-1)
         await self.transactions.delete(transaction)
         await self.db.commit()
         logger.info("Manual transaction deleted id=%s", transaction_id)

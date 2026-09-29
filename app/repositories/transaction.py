@@ -1,6 +1,8 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
@@ -186,39 +188,67 @@ class TransactionRepository:
 
         return changed
 
-    async def create(self, user_id: int, account_id: int | None, jar_id: int | None, transaction: MonoTransactionSchema):
-        db_transaction = TransactionRaw(
-            user_id=user_id,
-            account_id=account_id,
-            jar_id=jar_id,
-            source="monobank",
-            mono_transaction_id=transaction.id,
-            time=transaction.time,
-            description=transaction.description,
-            mcc=transaction.mcc,
-            original_mcc=transaction.originalMcc,
-            hold=transaction.hold,
-            amount=transaction.amount,
-            operation_amount=transaction.operationAmount,
-            currency_code=transaction.currencyCode,
-            commission_rate=transaction.commissionRate,
-            cashback_amount=transaction.cashbackAmount,
-            balance=transaction.balance,
-            comment=transaction.comment,
-            receipt_id=transaction.receiptId,
-            invoice_id=transaction.invoiceId,
-            counter_edrpou=transaction.counterEdrpou,
-            counter_iban=transaction.counterIban,
-            counter_name=transaction.counterName,
-            raw_json=transaction.model_dump(),
+    async def insert_from_mono(
+        self, user_id: int, account_id: int | None, jar_id: int | None, transaction: MonoTransactionSchema,
+    ) -> int | None:
+        """Insert a Monobank transaction unless one with the same Monobank id
+        already exists. Returns the new row's id, or None if it was already
+        there - the webhook and the statement backfill can deliver the same
+        transaction concurrently, and a check-then-insert would race."""
+        result = await self.db.execute(
+            pg_insert(TransactionRaw)
+            .values(
+                user_id=user_id,
+                account_id=account_id,
+                jar_id=jar_id,
+                source="monobank",
+                mono_transaction_id=transaction.id,
+                time=transaction.time,
+                description=transaction.description,
+                mcc=transaction.mcc,
+                original_mcc=transaction.originalMcc,
+                hold=transaction.hold,
+                amount=transaction.amount,
+                operation_amount=transaction.operationAmount,
+                currency_code=transaction.currencyCode,
+                commission_rate=transaction.commissionRate,
+                cashback_amount=transaction.cashbackAmount,
+                balance=transaction.balance,
+                comment=transaction.comment,
+                receipt_id=transaction.receiptId,
+                invoice_id=transaction.invoiceId,
+                counter_edrpou=transaction.counterEdrpou,
+                counter_iban=transaction.counterIban,
+                counter_name=transaction.counterName,
+                raw_json=transaction.model_dump(),
+            )
+            .on_conflict_do_nothing(index_elements=[TransactionRaw.mono_transaction_id])
+            .returning(TransactionRaw.id)
         )
+        return result.scalar_one_or_none()
 
+    async def get_for_categorization(self, transaction_id: int) -> Optional[TransactionRaw]:
+        """Lock the row for the rest of the DB transaction. Returns None if it
+        doesn't exist or another worker already holds it."""
+        result = await self.db.execute(
+            select(TransactionRaw)
+            .where(TransactionRaw.id == transaction_id)
+            .with_for_update(skip_locked=True)
+        )
+        return result.scalar_one_or_none()
 
-        self.db.add(db_transaction)
-
-        await self.db.flush()
-
-        return db_transaction
+    async def list_uncategorized_ids(self, created_before: datetime, limit: int) -> list[int]:
+        result = await self.db.execute(
+            select(TransactionRaw.id)
+            .where(
+                TransactionRaw.source == "monobank",
+                TransactionRaw.category_id.is_(None),
+                TransactionRaw.created_at < created_before,
+            )
+            .order_by(TransactionRaw.created_at)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def create_manual(
         self,

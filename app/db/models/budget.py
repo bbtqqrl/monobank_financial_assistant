@@ -1,7 +1,6 @@
-from sqlalchemy import Date, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from datetime import date
 from typing import TYPE_CHECKING
 
 from app.db.base import Base
@@ -29,13 +28,10 @@ class Budget(Base):
         index=True,
     )
 
+    # Monthly limit. What's been spent against it isn't stored - it's summed
+    # from transactions on read (see BudgetRepository.spent_by_category), so
+    # it can't drift on re-categorization, hold settlement or backfill.
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    current_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    # Start of the calendar month `current_amount` covers. Reset lazily
-    # (see BudgetRepository) whenever the budget is read/updated in a later
-    # month, rather than via a scheduled job.
-    period_start: Mapped[date] = mapped_column(Date, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="budgets")
     category: Mapped["Category"] = relationship(back_populates="budgets")

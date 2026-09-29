@@ -13,3 +13,16 @@ class AccountResponse(BaseModel):
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class JarResponse(BaseModel):
+    id: int
+    mono_jar_id: str
+    title: str
+    description: str | None
+    currency_code: int
+    balance: int
+    goal: int | None
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)

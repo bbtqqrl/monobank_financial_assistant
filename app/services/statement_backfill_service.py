@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 BACKFILL_DAYS = 30
 STATEMENT_RATE_LIMIT_SECONDS = 60
+# Monobank returns at most this many items per statement request, newest
+# first; a full page means there's more to fetch further back.
+STATEMENT_PAGE_SIZE = 500
 AI_CONCURRENCY = 8
 
 
@@ -27,6 +31,8 @@ class StatementBackfillService:
         self.accounts = AccountRepository(db)
         self.jars = JarRepository(db)
         self.transactions = TransactionRepository(db)
+        self._last_statement_call: float | None = None
+        self._ai_semaphore = asyncio.Semaphore(AI_CONCURRENCY)
 
     async def backfill(self, user_id: int, token: str) -> None:
         accounts = [
@@ -43,44 +49,46 @@ class StatementBackfillService:
         to_ts = int(datetime.now(timezone.utc).timestamp())
         from_ts = to_ts - BACKFILL_DAYS * 86400
 
-        created_ids: list[int] = []
+        # Each account's transactions are categorized as soon as they're
+        # stored, overlapping with the rate-limit wait before the next account,
+        # rather than all at the end where a crash would lose the lot.
+        categorization_tasks: list[asyncio.Task] = []
         try:
-            first = True
             for account in accounts:
-                if not first:
-                    await asyncio.sleep(STATEMENT_RATE_LIMIT_SECONDS)
-                first = False
-                created_ids += await self._backfill_account(user_id, token, account, from_ts, to_ts)
+                created_ids = await self._fetch_and_store(
+                    user_id, token, account.mono_account_id, from_ts, to_ts,
+                    account_id=account.id, jar_id=None,
+                )
+                if created_ids is not None:
+                    self.accounts.mark_backfilled(account, datetime.now(timezone.utc))
+                    await self.db.commit()
+                    categorization_tasks.append(asyncio.create_task(self._categorize_all(created_ids)))
 
             for jar in jars:
-                if not first:
-                    await asyncio.sleep(STATEMENT_RATE_LIMIT_SECONDS)
-                first = False
-                created_ids += await self._backfill_jar(user_id, token, jar, from_ts, to_ts)
+                created_ids = await self._fetch_and_store(
+                    user_id, token, jar.mono_jar_id, from_ts, to_ts,
+                    account_id=None, jar_id=jar.id,
+                )
+                if created_ids is not None:
+                    self.jars.mark_backfilled(jar, datetime.now(timezone.utc))
+                    await self.db.commit()
+                    categorization_tasks.append(asyncio.create_task(self._categorize_all(created_ids)))
         finally:
             await self.api.close()
+            await asyncio.gather(*categorization_tasks)
 
-        await self._categorize_all(created_ids)
-
-    async def _backfill_account(self, user_id: int, token: str, account, from_ts: int, to_ts: int) -> list[int]:
-        created_ids = await self._fetch_and_store(
-            user_id, token, account.mono_account_id, from_ts, to_ts,
-            account_id=account.id, jar_id=None,
-        )
-        if created_ids is not None:
-            self.accounts.mark_backfilled(account, datetime.now(timezone.utc))
-            await self.db.commit()
-        return created_ids or []
-
-    async def _backfill_jar(self, user_id: int, token: str, jar, from_ts: int, to_ts: int) -> list[int]:
-        created_ids = await self._fetch_and_store(
-            user_id, token, jar.mono_jar_id, from_ts, to_ts,
-            account_id=None, jar_id=jar.id,
-        )
-        if created_ids is not None:
-            self.jars.mark_backfilled(jar, datetime.now(timezone.utc))
-            await self.db.commit()
-        return created_ids or []
+    async def _get_statement(self, token: str, mono_id: str, from_ts: int, to_ts: int) -> list[dict]:
+        """Monobank allows one statement request per 60s per token, across
+        all of that token's accounts - so the wait is tracked per call, not
+        per account (an account can take several paged calls)."""
+        if self._last_statement_call is not None:
+            wait = STATEMENT_RATE_LIMIT_SECONDS - (time.monotonic() - self._last_statement_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+        try:
+            return await self.api.get_statement(token, mono_id, from_ts, to_ts)
+        finally:
+            self._last_statement_call = time.monotonic()
 
     async def _fetch_and_store(
         self,
@@ -92,35 +100,51 @@ class StatementBackfillService:
         account_id: int | None,
         jar_id: int | None,
     ) -> list[int] | None:
-        try:
-            items = await self.api.get_statement(token, mono_id, from_ts, to_ts)
-        except Exception:
-            logger.exception(
-                "Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id,
-            )
-            return None
+        """Returns ids of newly stored transactions, or None if any page
+        failed to download (the account then stays pending and is retried on
+        the next startup; what was stored so far is kept and deduplicated)."""
+        created_ids: list[int] = []
+        page_to = to_ts
 
-        created_ids = []
-        for raw in items:
-            transaction = MonoTransactionSchema.model_validate(raw)
-            if await self.transactions.get_by_mono_id(transaction.id) is not None:
-                continue
-            db_transaction = await self.transactions.create(
-                user_id=user_id, account_id=account_id, jar_id=jar_id, transaction=transaction,
-            )
-            created_ids.append(db_transaction.id)
+        while True:
+            try:
+                items = await self._get_statement(token, mono_id, from_ts, page_to)
+            except Exception:
+                logger.exception(
+                    "Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id,
+                )
+                await self.db.commit()
+                return None
 
-        await self.db.commit()
+            for raw in items:
+                transaction = MonoTransactionSchema.model_validate(raw)
+                created_id = await self.transactions.insert_from_mono(
+                    user_id=user_id, account_id=account_id, jar_id=jar_id, transaction=transaction,
+                )
+                if created_id is not None:
+                    created_ids.append(created_id)
+            await self.db.commit()
+
+            if len(items) < STATEMENT_PAGE_SIZE:
+                break
+
+            # Items sharing the oldest second may straddle the page boundary,
+            # so the next page includes that second again; duplicates are
+            # dropped by insert_from_mono. If a whole page is one second,
+            # step past it to guarantee progress.
+            oldest = min(item["time"] for item in items)
+            page_to = oldest if oldest < page_to else page_to - 1
+            if page_to <= from_ts:
+                break
+
         logger.info(
             "Backfilled %s new transactions for mono_id=%s user_id=%s", len(created_ids), mono_id, user_id,
         )
         return created_ids
 
     async def _categorize_all(self, transaction_ids: list[int]) -> None:
-        semaphore = asyncio.Semaphore(AI_CONCURRENCY)
-
         async def _categorize_one(transaction_id: int) -> None:
-            async with semaphore, SessionLocal() as db:
+            async with self._ai_semaphore, SessionLocal() as db:
                 service = CategorizationService(db, get_categorization_ai_client())
                 try:
                     await service.categorize(transaction_id)
