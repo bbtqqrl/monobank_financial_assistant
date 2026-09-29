@@ -3,6 +3,7 @@ import { Stub } from '@/ui/Stub';
 export default function OverviewScreen() {
   return (
     <Stub
+      background="none"
       title="Огляд"
       note="Баланс · віджет карти · останні транзакції"
       links={[

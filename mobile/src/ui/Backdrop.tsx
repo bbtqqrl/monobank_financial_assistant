@@ -89,9 +89,9 @@ function SpotView({ id, spot, index, strength, running }: SpotProps) {
     if (!running || reduceMotion) return;
     const wave = (ms: number) =>
       withRepeat(withTiming(1, { duration: ms, easing: Easing.inOut(Easing.sin) }), -1, true);
-    tx.value = wave(drift.xMs);
-    ty.value = wave(drift.yMs);
-    ts.value = wave(drift.sMs);
+    tx.set(wave(drift.xMs));
+    ty.set(wave(drift.yMs));
+    ts.set(wave(drift.sMs));
     return () => {
       cancelAnimation(tx);
       cancelAnimation(ty);
@@ -131,7 +131,7 @@ function Layer({ tint, active }: { tint: Tint; active: boolean }) {
   const shown = useSharedValue(0);
 
   useEffect(() => {
-    shown.value = withTiming(active ? 1 : 0, { duration: FADE_MS, easing: Easing.inOut(Easing.cubic) });
+    shown.set(withTiming(active ? 1 : 0, { duration: FADE_MS, easing: Easing.inOut(Easing.cubic) }));
   }, [active, shown]);
 
   // the incoming tint also "breathes in" a little

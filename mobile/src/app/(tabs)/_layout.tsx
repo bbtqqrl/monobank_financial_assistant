@@ -1,50 +1,45 @@
-import { Tabs, usePathname } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { FONT } from '@/lib/fonts';
 import { useTheme } from '@/theme';
-import { Backdrop, type BackdropVariant } from '@/ui/Backdrop';
+import { TAB_ICONS } from '@/ui/tabIcons';
 
-// One backdrop for all tabs, each tab has its own tint.
-// Огляд has no spots: the map goes there.
-const TAB_TINT: Record<string, BackdropVariant> = {
-  '/': 'none',
-  '/budgets': 'green',
-  '/add': 'warm',
-  '/analytics': 'warm',
-  '/assistant': 'accent',
-};
-
-// TODO: custom glass tab bar
+// System tab bar: on iOS 26+ it's Liquid Glass (lens under the finger,
+// minimises on scroll), on Android it's the Material bar.
+// Icons are our own PNGs in design colours, drawn "original" so iOS doesn't
+// repaint the idle ones black. The native container isn't transparent, so
+// each tab draws its own backdrop.
 export default function TabsLayout() {
-  const { c } = useTheme();
-  const pathname = usePathname();
+  const { c, dark } = useTheme();
+  const icons = dark ? TAB_ICONS.dark : TAB_ICONS.light;
+  const label = { fontFamily: FONT.ui.semiBold, fontSize: 10 };
 
   return (
-    <View style={styles.root}>
-      <Backdrop variant={TAB_TINT[pathname] ?? 'warm'} />
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          animation: 'fade',
-          sceneStyle: { backgroundColor: 'transparent' },
-          tabBarActiveTintColor: c.ink,
-          tabBarInactiveTintColor: c.ghost,
-          tabBarStyle: { backgroundColor: c.sheet },
-          tabBarLabelStyle: { fontFamily: FONT.ui.medium, fontSize: 11 },
-          tabBarIconStyle: { display: 'none' },
-        }}
-      >
-        <Tabs.Screen name="index" options={{ title: 'Огляд' }} />
-        <Tabs.Screen name="budgets" options={{ title: 'Бюджети' }} />
-        <Tabs.Screen name="add" options={{ title: 'Додати' }} />
-        <Tabs.Screen name="analytics" options={{ title: 'Аналітика' }} />
-        <Tabs.Screen name="assistant" options={{ title: 'Асистент' }} />
-      </Tabs>
-    </View>
+    <NativeTabs
+      tintColor={c.ink}
+      labelStyle={{ default: { ...label, color: c.ghost }, selected: { ...label, color: c.ink } }}
+      minimizeBehavior="onScrollDown"
+    >
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Label>Огляд</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon src={icons.index} renderingMode="original" md="home" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="budgets">
+        <NativeTabs.Trigger.Label>Бюджети</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon src={icons.budgets} renderingMode="original" md="speed" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="add">
+        <NativeTabs.Trigger.Label>Додати</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon src={icons.add} renderingMode="original" md="add_circle" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="analytics">
+        <NativeTabs.Trigger.Label>Аналітика</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon src={icons.analytics} renderingMode="original" md="bar_chart" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="assistant">
+        <NativeTabs.Trigger.Label>Асистент</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon src={icons.assistant} renderingMode="original" md="auto_awesome" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-});

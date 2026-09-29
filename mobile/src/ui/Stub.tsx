@@ -11,17 +11,16 @@ type Props = {
   title: string;
   note?: string;
   links?: { label: string; href: Href }[];
-  // shared: transparent, the tabs layout draws the backdrop
-  background?: BackdropVariant | 'shared';
+  background?: BackdropVariant;
 };
 
 // TODO: placeholder, remove once real screens are in
-export function Stub({ title, note, links = [], background = 'shared' }: Props) {
+export function Stub({ title, note, links = [], background = 'warm' }: Props) {
   const { c } = useTheme();
 
   return (
     <View style={styles.screen}>
-      {background !== 'shared' ? <Backdrop variant={background} /> : null}
+      <Backdrop variant={background} />
       <SafeAreaView style={styles.screen}>
         <View style={styles.body}>
           <Text style={styles.title}>{title}</Text>
