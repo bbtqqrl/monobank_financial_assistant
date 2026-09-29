@@ -1,44 +1,46 @@
 import { Link, type Href } from 'expo-router';
+import type { ComponentProps } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FONT } from '@/lib/fonts';
 import { TEXT, useTheme } from '@/theme';
 import { Backdrop, type BackdropVariant } from '@/ui/Backdrop';
+import { Header } from '@/ui/Header';
 import { Text } from '@/ui/Text';
 
-type Props = {
-  title: string;
+type Props = ComponentProps<typeof Header> & {
   note?: string;
   links?: { label: string; href: Href }[];
   background?: BackdropVariant;
 };
 
 // TODO: placeholder, remove once real screens are in
-export function Stub({ title, note, links = [], background = 'warm' }: Props) {
+export function Stub({ note, links = [], background = 'warm', ...header }: Props) {
   const { c } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.screen}>
       <Backdrop variant={background} />
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.body}>
-          <Text style={styles.title}>{title}</Text>
-          {note ? <Text tone="faint">{note}</Text> : null}
-          {links.map((l) => (
-            <Link key={l.label} href={l.href} style={[TEXT.bodyStrong, styles.link, { color: c.accentText }]}>
-              {l.label} →
-            </Link>
-          ))}
-        </View>
-      </SafeAreaView>
+      {/* Figma: header at 58 under a 47pt status bar */}
+      <View style={[styles.top, { paddingTop: insets.top + 11 }]}>
+        <Header {...header} />
+      </View>
+      <View style={styles.body}>
+        {note ? <Text tone="faint">{note}</Text> : null}
+        {links.map((l) => (
+          <Link key={l.label} href={l.href} style={[TEXT.bodyStrong, styles.link, { color: c.accentText }]}>
+            {l.label} →
+          </Link>
+        ))}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  top: { paddingHorizontal: 20 },
   body: { flex: 1, padding: 20, gap: 10, justifyContent: 'center' },
-  title: { fontFamily: FONT.display.medium, fontSize: 26, lineHeight: 32, letterSpacing: -0.26 },
   link: { paddingVertical: 6 },
 });
