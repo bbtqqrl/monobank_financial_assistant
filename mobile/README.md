@@ -1,5 +1,15 @@
 # Mobile
 
+## Backend address
+
+The app talks to the FastAPI backend from this repo. Put its address into `.env.local` (not committed):
+
+```bash
+cp .env.example .env.local
+```
+
+Then edit `EXPO_PUBLIC_API_URL`, e.g. `http://<server-ip>:8000`, and restart `npx expo start`.
+
 ## Run on your phone (Expo Go)
 
 1. Install **Expo Go** from the App Store / Google Play.
