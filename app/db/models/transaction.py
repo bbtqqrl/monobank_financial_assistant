@@ -1,4 +1,6 @@
-from sqlalchemy import JSON, BigInteger, Float, ForeignKey, Integer, String, Text, Boolean
+from datetime import datetime
+
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -79,6 +81,13 @@ class TransactionRaw(Base):
     counter_iban: Mapped[str | None] = mapped_column(String, nullable=True)
     counter_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # When the row landed in our DB (`time` is the bank's timestamp). Lets the
+    # categorization sweeper tell a transaction whose in-flight categorization
+    # was lost to a restart from one that is still being worked on.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
 
     user: Mapped["User"] = relationship(
         back_populates="transactions",

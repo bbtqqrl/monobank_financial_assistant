@@ -12,6 +12,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 
 MONO_TOKEN_ENCRYPTION_KEY = os.getenv("MONO_TOKEN_ENCRYPTION_KEY")
 
+MONO_WEBHOOK_URL = os.getenv("MONO_WEBHOOK_URL")
 MONO_WEBHOOK_VERIFY_SIGNATURE = os.getenv("MONO_WEBHOOK_VERIFY_SIGNATURE", "true").lower() == "true"
 
 # Optional: when unset, categorization falls back to MockCategorizationAIClient.
@@ -25,3 +26,5 @@ if not JWT_SECRET_KEY:
     raise RuntimeError("JWT_SECRET_KEY environment variable is not set")
 if not MONO_TOKEN_ENCRYPTION_KEY:
     raise RuntimeError("MONO_TOKEN_ENCRYPTION_KEY environment variable is not set")
+if not MONO_WEBHOOK_URL:
+    raise RuntimeError("MONO_WEBHOOK_URL environment variable is not set")

@@ -16,6 +16,8 @@ const light = {
   onPrimary: '#FBF8F3',
   cardA: '#2E2925',
   cardB: '#17150F',
+  // icons on the dark balance card
+  onCard: '#D4CEC6',
   white: '#FFFFFF',
   shade: '#282018',
   shadow: '#282018',
@@ -56,6 +58,7 @@ const dark: Colors = {
   onPrimary: '#F5F7FF',
   cardA: '#34333F',
   cardB: '#22212C',
+  onCard: '#D4CEC6',
   white: '#FFFFFF',
   shade: '#FFFFFF',
   shadow: '#000000',

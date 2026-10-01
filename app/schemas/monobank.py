@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Any
 
+from app.schemas.account import AccountResponse, JarResponse
+
 
 class ConnectMonobankRequest(BaseModel):
     token: str
@@ -61,3 +63,7 @@ class MonoWebhookData(BaseModel):
 class MonoWebhookPayload(BaseModel):
     type: str
     data: MonoWebhookData
+
+class MonobankRefreshResponse(BaseModel):
+    accounts: list[AccountResponse]
+    jars: list[JarResponse]
