@@ -67,3 +67,9 @@ export function accountLabel(a: Account) {
   const last4 = a.masked_pan?.slice(-4);
   return last4 ? `${name} · ${last4}` : name;
 }
+
+// account id → its currency, to know what currency a transaction amount is in
+export function useAccountCurrencies(): Map<number, number> {
+  const { data } = useAccounts();
+  return new Map(data?.map((a) => [a.id, a.currency_code]));
+}

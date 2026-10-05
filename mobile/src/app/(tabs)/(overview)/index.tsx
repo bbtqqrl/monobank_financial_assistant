@@ -1,11 +1,15 @@
 import { Link, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { accountLabel, ownBalance, sortedAccounts, useAccounts } from '@/api/accounts';
+import { accountLabel, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
+import { useTransactions } from '@/api/transactions';
+import { whenLabel } from '@/lib/time';
+import { txRow } from '@/lib/txRow';
 import { TEXT, useTheme } from '@/theme';
 import { BalanceCard } from '@/ui/BalanceCard';
 import { BalanceCarousel } from '@/ui/BalanceCarousel';
 import { Header } from '@/ui/Header';
+import { RecentCard } from '@/ui/RecentCard';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 
@@ -26,8 +30,17 @@ export default function OverviewScreen() {
     account: accountLabel(a),
   }));
 
+  const recent = useTransactions({ type: 'expense', limit: 5 });
+  const currencies = useAccountCurrencies();
+  const rows = recent.data?.map((t) => txRow(t, currencies, whenLabel(t.time)));
+
+  const refresh = () => {
+    accounts.refetch();
+    recent.refetch();
+  };
+
   return (
-    <Screen background="none" refreshing={accounts.isRefetching} onRefresh={() => accounts.refetch()}>
+    <Screen background="none" refreshing={accounts.isRefetching || recent.isRefetching} onRefresh={refresh}>
       <Header
         title="Огляд"
         left={{ icon: 'person', label: 'Профіль', onPress: () => router.push('/profile') }}
@@ -56,6 +69,12 @@ export default function OverviewScreen() {
         // still loading
         <BalanceCard />
       )}
+
+      <RecentCard
+        rows={rows}
+        error={recent.isError && !recent.data ? 'Не вдалося завантажити транзакції' : undefined}
+        onSeeAll={() => router.push('/transactions')}
+      />
 
       <View style={styles.dev}>
         {DEV_LINKS.map((l) => (
