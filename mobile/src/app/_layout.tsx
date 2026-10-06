@@ -3,25 +3,28 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useSession } from '@/api/auth';
 import { queryClient } from '@/api/query';
 import { loadTokens } from '@/api/tokens';
 import { FONT_FILES } from '@/lib/fonts';
 import { useTheme } from '@/theme';
+import { loadThemePref } from '@/theme/preference';
 
-// keep the splash until fonts and the saved session are ready
+// keep the splash until fonts, the theme choice and the saved session are ready
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const [loaded, error] = useFonts(FONT_FILES);
   const session = useSession();
   const { dark, c } = useTheme();
-  const ready = (loaded || error) && session !== 'loading';
+  const [themeLoaded, setThemeLoaded] = useState(false);
+  const ready = (loaded || error) && themeLoaded && session !== 'loading';
 
   useEffect(() => {
     loadTokens();
+    loadThemePref().finally(() => setThemeLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -45,6 +48,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="profile" />
           <Stack.Screen name="transaction/[id]" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && __DEV__}>
           <Stack.Screen name="dev/smoke" options={{ presentation: 'modal' }} />
           <Stack.Screen name="dev/kit" options={{ presentation: 'modal' }} />
         </Stack.Protected>

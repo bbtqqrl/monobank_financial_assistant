@@ -20,7 +20,7 @@ export default function TabsLayout() {
       labelStyle={{ default: { ...label, color: c.ghost }, selected: { ...label, color: c.ink } }}
       minimizeBehavior="onScrollDown"
     >
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger name="(overview)">
         <NativeTabs.Trigger.Label>Огляд</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={icons.index} renderingMode="original" md="home" />
       </NativeTabs.Trigger>

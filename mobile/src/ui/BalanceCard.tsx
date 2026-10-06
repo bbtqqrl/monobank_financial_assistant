@@ -7,18 +7,15 @@ import { Icon } from '@/ui/icons/Icon';
 import { Text } from '@/ui/Text';
 
 type Props = {
-  // "Баланс картки", or "Баланс рахунку" when there's no card
   label?: string;
-  // minor units, undefined while loading
   balance?: number;
   currency?: number;
   account?: string;
-  // shared by all cards, the eye hides every balance
   hidden?: boolean;
   onToggleHidden?: () => void;
   style?: StyleProp<ViewStyle>;
-  // change since the start of the month, %
-  changePct?: number;
+  // spendings this month
+  spent?: string;
 };
 
 const HIDDEN = '••••••';
@@ -30,7 +27,7 @@ export function BalanceCard({
   account,
   hidden = false,
   onToggleHidden,
-  changePct,
+  spent,
   style,
 }: Props) {
   const { c } = useTheme();
@@ -86,17 +83,21 @@ export function BalanceCard({
       </View>
 
       <View style={styles.bottom}>
-        {changePct !== undefined ? (
-          <View style={[styles.trend, { backgroundColor: white(0.1), borderColor: white(0.12) }]}>
-            <Icon name={changePct < 0 ? 'arrowDown' : 'arrowUp'} size={13} color={c.accentOnDark} weight={2.2} />
-            <Text variant="link" style={[styles.num, { color: c.accentOnDark }]}>
-              {Math.abs(changePct)}% за цей місяць
+        {spent ? (
+          <View
+            accessible
+            accessibilityLabel={hidden ? 'Витрати приховано' : `Витрати: ${spent}`}
+            style={[styles.trend, { backgroundColor: white(0.1), borderColor: white(0.12) }]}
+          >
+            <Icon name="arrowDown" size={13} color={c.accentOnDark} weight={2.2} />
+            <Text variant="link" numberOfLines={1} style={[styles.num, { color: c.accentOnDark }]}>
+              {hidden ? HIDDEN : spent}
             </Text>
           </View>
         ) : (
           <View />
         )}
-        <Text variant="rowCaption" style={[styles.account, { color: white(0.45) }]}>
+        <Text variant="rowCaption" numberOfLines={1} style={[styles.account, { color: white(0.45) }]}>
           {account}
         </Text>
       </View>
@@ -108,7 +109,6 @@ const styles = StyleSheet.create({
   card: { borderRadius: 26, padding: 17 },
   top: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   balance: { gap: 7 },
-  // 6% here, a bit tighter than the usual caps label
   label: { letterSpacing: 0.69 },
   // same height as the amount line
   amountSlot: { height: TEXT.amountXl.lineHeight, justifyContent: 'center' },
@@ -121,8 +121,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  bottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12 },
   trend: {
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -133,5 +134,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   num: { fontVariant: ['tabular-nums'] },
-  account: { letterSpacing: 0.48, fontVariant: ['tabular-nums'] },
+  account: { flexShrink: 1, letterSpacing: 0.48, fontVariant: ['tabular-nums'] },
 });
