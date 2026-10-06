@@ -1,3 +1,4 @@
+import { useIsFocused } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
@@ -126,7 +127,7 @@ function SpotView({ id, spot, index, strength, running }: SpotProps) {
   );
 }
 
-function Layer({ tint, active }: { tint: Tint; active: boolean }) {
+function Layer({ tint, active, focused }: { tint: Tint; active: boolean; focused: boolean }) {
   const { c, dark } = useTheme();
   const shown = useSharedValue(0);
 
@@ -143,7 +144,7 @@ function Layer({ tint, active }: { tint: Tint; active: boolean }) {
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, style]}>
       {spotsFor(tint, c.accent).map((spot, i) => (
-        <SpotView key={i} id={`${tint}${i}`} spot={spot} index={i} strength={dark ? DARK_STRENGTH : 1} running={active} />
+        <SpotView key={i} id={`${tint}${i}`} spot={spot} index={i} strength={dark ? DARK_STRENGTH : 1} running={active && focused} />
       ))}
     </Animated.View>
   );
@@ -151,6 +152,8 @@ function Layer({ tint, active }: { tint: Tint; active: boolean }) {
 
 export function Backdrop({ variant }: { variant: BackdropVariant }) {
   const { c } = useTheme();
+  // screens stay mounted in tabs and stacks, no point animating the hidden ones
+  const focused = useIsFocused();
   // layers mount the first time their tint is needed and stay for crossfades
   const [mounted, setMounted] = useState<Tint[]>([]);
   if (variant !== 'none' && !mounted.includes(variant)) setMounted([...mounted, variant]);
@@ -158,7 +161,7 @@ export function Backdrop({ variant }: { variant: BackdropVariant }) {
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: c.bg }]}>
       {mounted.map((tint) => (
-        <Layer key={tint} tint={tint} active={tint === variant} />
+        <Layer key={tint} tint={tint} active={tint === variant} focused={focused} />
       ))}
     </View>
   );

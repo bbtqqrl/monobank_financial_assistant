@@ -32,6 +32,7 @@ export default function LoginScreen() {
   const passwordRef = useRef<TextInput>(null);
 
   const submit = async () => {
+    if (busy || !email.trim() || !password) return;
     setBusy(true);
     setError(null);
     try {

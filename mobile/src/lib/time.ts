@@ -59,3 +59,8 @@ export function fullDate(unixSeconds: number) {
   const d = new Date(unixSeconds * 1000);
   return `${withYear(d)}, ${clock.format(d)}`;
 }
+
+// "жовтень"
+export function monthLabel(d = new Date()) {
+  return new Intl.DateTimeFormat('uk', { month: 'long' }).format(d);
+}

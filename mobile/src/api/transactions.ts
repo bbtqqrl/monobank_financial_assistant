@@ -1,44 +1,52 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
 
 import { api } from './client';
 
+const int = z.number().int();
+
 // GET /transactions, same fields as the backend's TransactionListItem
-export type Transaction = {
-  id: number;
-  source: 'monobank' | 'manual' | string;
+const TransactionSchema = z.object({
+  id: int,
+  // monobank or manual
+  source: z.string(),
   // unix seconds
-  time: number;
-  description: string;
+  time: int,
+  description: z.string(),
   // minor units in the account's currency, negative = spent
-  amount: number;
+  amount: int,
   // minor units in the currency of the purchase itself
-  operation_amount: number | null;
-  currency_code: number;
-  mcc: number | null;
-  account_id: number | null;
-  jar_id: number | null;
-  transfer_pair_id: number | null;
-  category: { id: number; name: string; slug: string } | null;
+  operation_amount: int.nullable(),
+  currency_code: int,
+  mcc: int.nullable(),
+  account_id: int.nullable(),
+  jar_id: int.nullable(),
+  transfer_pair_id: int.nullable(),
+  category: z.object({ id: int, name: z.string(), slug: z.string() }).nullable(),
   // ai, ai_low_confidence, mapping, mapping_low_confidence, rule, user, ai_failed
-  category_source: string | null;
-  category_confidence: number | null;
-};
+  category_source: z.string().nullable(),
+  category_confidence: z.number().nullable(),
+});
 
 // GET /transactions/{id}
-export type TransactionDetail = Transaction & {
+const TransactionDetailSchema = TransactionSchema.extend({
   // account balance right after this transaction
-  balance: number | null;
-  comment: string | null;
-  counter_name: string | null;
-  counter_edrpou: string | null;
-  counter_iban: string | null;
-};
+  balance: int.nullable(),
+  comment: z.string().nullable(),
+  counter_name: z.string().nullable(),
+  counter_edrpou: z.string().nullable(),
+  counter_iban: z.string().nullable(),
+});
+
+const PageSchema = z.object({ items: z.array(TransactionSchema), page: int, limit: int, total: int });
+
+export type Transaction = z.infer<typeof TransactionSchema>;
+export type TransactionDetail = z.infer<typeof TransactionDetailSchema>;
+type Page = z.infer<typeof PageSchema>;
 
 export type TxType = 'expense' | 'income' | 'transfer';
-
-type Page = { items: Transaction[]; page: number; limit: number; total: number };
 
 function listUrl(type: TxType | undefined, limit: number, page = 1) {
   const params = new URLSearchParams({ limit: String(limit), page: String(page) });
@@ -50,7 +58,7 @@ function listUrl(type: TxType | undefined, limit: number, page = 1) {
 export function useTransactions({ type, limit = 30 }: { type?: TxType; limit?: number } = {}) {
   return useQuery({
     queryKey: ['transactions', { type, limit }],
-    queryFn: () => api<Page>(listUrl(type, limit)),
+    queryFn: () => api(PageSchema, listUrl(type, limit)),
     select: (page) => page.items,
   });
 }
@@ -61,7 +69,7 @@ const PAGE_SIZE = 50;
 export function useTransactionPages(type?: TxType) {
   return useInfiniteQuery({
     queryKey: ['transactions', 'pages', { type }],
-    queryFn: ({ pageParam }) => api<Page>(listUrl(type, PAGE_SIZE, pageParam)),
+    queryFn: ({ pageParam }) => api(PageSchema, listUrl(type, PAGE_SIZE, pageParam)),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
   });
@@ -84,7 +92,7 @@ export function useTransaction(id: number) {
   const qc = useQueryClient();
   return useQuery({
     queryKey: ['transaction', id],
-    queryFn: () => api<TransactionDetail>(`/transactions/${id}`),
+    queryFn: () => api(TransactionDetailSchema, `/transactions/${id}`),
     placeholderData: () => fromLists(qc, id),
     enabled: Number.isInteger(id),
   });
@@ -99,4 +107,29 @@ export function txCurrency(t: Transaction, accountCurrency: Map<number, number>)
 export function foreignPart(t: Transaction, accountCurrency: Map<number, number>) {
   if (t.operation_amount === null || t.currency_code === txCurrency(t, accountCurrency)) return undefined;
   return { amount: t.operation_amount, currency: t.currency_code };
+}
+
+function monthStart(now: Date) {
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  return `${now.getFullYear()}-${mm}-01`;
+}
+
+export function useMonthSpend() {
+  const from = monthStart(new Date());
+  return useQuery({
+    queryKey: ['month-spend', from],
+    queryFn: async () => {
+      const spent = new Map<number, number>();
+      const seen = new Set<number>();
+      for (let page = 1; ; page++) {
+        const p = await api(PageSchema, `/transactions?type=expense&from=${from}&limit=100&page=${page}`);
+        for (const t of p.items) {
+          if (t.account_id === null || seen.has(t.id)) continue;
+          seen.add(t.id);
+          spent.set(t.account_id, (spent.get(t.account_id) ?? 0) - t.amount);
+        }
+        if (page * p.limit >= p.total) return spent;
+      }
+    },
+  });
 }

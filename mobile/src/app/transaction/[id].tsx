@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Fragment } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -8,6 +8,7 @@ import { foreignPart, txCurrency, useTransaction, type TransactionDetail } from 
 import { categoryLook } from '@/lib/categories';
 import { formatMoney } from '@/lib/money';
 import { fullDate } from '@/lib/time';
+import { goBack } from '@/lib/nav';
 import { TEXT, useTheme, withAlpha } from '@/theme';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
@@ -50,12 +51,12 @@ export default function TransactionScreen() {
     <Header
       title="Деталі транзакції"
       small
-      left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: () => router.back() }}
+      left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
       right={{ icon: 'dots', label: 'Ще', weight: 2.4 }}
     />
   );
 
-  if (!t) {
+  if (!t || !currencies) {
     const notFound = tx.error instanceof ApiError && tx.error.status === 404;
     return (
       <Screen background="green">
@@ -85,7 +86,8 @@ export default function TransactionScreen() {
   if (t.counter_name) info.push(['Отримувач', t.counter_name]);
   if (t.comment) info.push(['Коментар', t.comment]);
   if (t.mcc !== null) info.push(['MCC', String(t.mcc)]);
-  if (t.balance !== null) info.push(['Баланс після', formatMoney(t.balance, currency)]);
+  // like the card balance, without the credit limit
+  if (t.balance !== null) info.push(['Баланс після', formatMoney(t.balance - (account?.credit_limit ?? 0), currency)]);
 
   return (
     <Screen background="green">

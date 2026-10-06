@@ -58,7 +58,9 @@ export function formatMoney(minor: number, currency: number = UAH, opts: MoneyOp
   }
 
   const number = digits + fraction;
-  const prefix = sign === 'never' || minor === 0 ? '' : minor < 0 ? MINUS : sign === 'always' ? '+' : '';
+  // −30 kopiyky without cents would read "−0 ₴"
+  const zero = minor === 0 || (whole === 0 && !fraction);
+  const prefix = sign === 'never' || zero ? '' : minor < 0 ? MINUS : sign === 'always' ? '+' : '';
 
   // en puts one-char symbols in front: −₴526.40, $1,234.00
   if (locale === 'en' && cur.symbol.length === 1) return prefix + cur.symbol + number;

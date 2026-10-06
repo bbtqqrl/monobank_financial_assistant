@@ -44,7 +44,7 @@ export function RecentCard({ rows, error, onSeeAll }: Props) {
         ))
       ) : rows.length === 0 ? (
         <Text tone="faint" style={styles.note}>
-          Тут зʼявляться твої витрати
+          Тут зʼявляться твої транзакції
         </Text>
       ) : (
         rows.map(({ key, ...row }, i) => (

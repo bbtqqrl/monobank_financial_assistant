@@ -28,6 +28,7 @@ const LOOKS: [CategoryLook, string[]][] = [
   [{ icon: 'income', color: 'green' }, ['popovnennia-rakhunku']],
   [{ icon: 'card', color: 'dim' }, ['finansy', 'bankivski-komisii', 'komisii-ta-zbory', 'kredyty', 'pohashennia-kredytu', 'strakhuvannia', 'podatky', 'perekazy', 'hroshovi-zniattia']],
   [{ icon: 'sparkle', color: 'rose' }, ['podarunky-ta-blahodiinist', 'podarunky', 'blahodiinist']],
+  [{ icon: 'card', color: 'neutral' }, ['inshi-vytraty', 'nevidome']],
   [{ icon: 'list', color: 'slate' }, ['profesiini-servisy', 'iurydychni-posluhy', 'bukhhalterski-posluhy', 'derzhavni-posluhy', 'poshta-ta-dostavka', 'druk-ta-kopiiuvannia', 'orenda-obladnannia', 'robochi-vytraty', 'marketynh-ta-reklama']],
 ];
 

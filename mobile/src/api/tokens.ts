@@ -1,7 +1,9 @@
 import * as SecureStore from 'expo-secure-store';
+import { z } from 'zod';
 
 // JWT pair from the backend, kept in the Keychain between launches.
-export type Tokens = { access: string; refresh: string };
+const TokensSchema = z.object({ access: z.string(), refresh: z.string() });
+export type Tokens = z.infer<typeof TokensSchema>;
 
 const KEY = 'auth.tokens';
 
@@ -23,7 +25,7 @@ export async function loadTokens() {
   let stored: Tokens | null = null;
   try {
     const raw = await SecureStore.getItemAsync(KEY);
-    stored = raw ? (JSON.parse(raw) as Tokens) : null;
+    stored = raw ? TokensSchema.parse(JSON.parse(raw)) : null;
   } catch {
     // unreadable entry, treat as signed out
   }
