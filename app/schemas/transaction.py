@@ -50,7 +50,9 @@ class CreateTransactionRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     amount: int = Field(description="In minor units (kopecks). Negative = expense, positive = income.")
     currency_code: int = 980
-    category_id: int | None = None
+    # Required: a manual transaction is never seen by the AI or the sweeper,
+    # so without a category here it would stay uncategorized forever.
+    category_id: int
     account_id: int | None = None
     jar_id: int | None = None
     time: int | None = Field(default=None, description="Unix seconds; defaults to now if omitted")

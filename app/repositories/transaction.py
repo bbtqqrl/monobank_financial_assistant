@@ -265,12 +265,15 @@ class TransactionRepository:
         currency_code: int,
         time: int,
         comment: str | None,
+        category_id: int,
     ) -> TransactionRaw:
         db_transaction = TransactionRaw(
             user_id=user_id,
             account_id=account_id,
             jar_id=jar_id,
             source="manual",
+            category_id=category_id,
+            category_source="user",
             mono_transaction_id=None,
             time=time,
             description=description,
