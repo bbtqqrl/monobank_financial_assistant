@@ -3,23 +3,24 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.categories import Category
 from app.db.models.mcc_codes import MccCode
+from app.repositories.account import AccountRepository
 from app.repositories.category import CategoryRepository
+from app.repositories.jar import JarRepository
 from app.repositories.merchant_mapping import MerchantCategoryMappingRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.categorization import CategorizationCandidate
 from app.services.ai.base import CategorizationAIClient
 from app.services.merchant_key import build_merchant_key
-from app.services.transfer_mcc import TRANSFER_MCC_CODES
 
 logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.7
 
-JAR_MOVEMENT_CATEGORY_SLUG = "zaoshchadzhennia"
-TRANSFER_MCC_CATEGORY_SLUG = "perekazy"
-LOAN_DRAW_CATEGORY_SLUG = "kredyty"
-LOAN_REPAYMENT_CATEGORY_SLUG = "pohashennia-kredytu"
+# An outgoing payment can never be income; anything else may be an expense,
+# a refund (incoming, expense kind), a transfer or unknown.
+OUTGOING_KINDS = ("expense", "transfer", "unknown")
 
 
 class CategorizationAIError(Exception):
@@ -32,6 +33,18 @@ class NotManualTransactionError(Exception):
     transaction, which must stay a faithful copy of the bank's record."""
 
 
+def _mapping_fits_direction(kind: str, amount: int) -> bool:
+    """A mapping is keyed by merchant, not by direction. One learned from a
+    purchase (expense) must not label money coming back from that merchant -
+    that could be a refund or, for a person, a transfer to the user - and one
+    learned from income must not label an outgoing payment."""
+    if kind == "expense":
+        return amount < 0
+    if kind == "income":
+        return amount > 0
+    return True
+
+
 class CategorizationService:
 
     def __init__(self, db: AsyncSession, ai_client: CategorizationAIClient | None = None):
@@ -40,6 +53,8 @@ class CategorizationService:
         self.transactions = TransactionRepository(db)
         self.categories = CategoryRepository(db)
         self.mappings = MerchantCategoryMappingRepository(db)
+        self.accounts = AccountRepository(db)
+        self.jars = JarRepository(db)
 
     async def categorize(self, transaction_id: int) -> None:
         # Row lock: the webhook path, backfill and the sweeper can all reach
@@ -55,10 +70,16 @@ class CategorizationService:
             logger.info("Categorization skipped: transaction id=%s already categorized", transaction_id)
             return
 
+        # Linked first: the pair is a strong hint that this is the user's own
+        # money moving, and it's useful data on its own.
+        await self._try_link_transfer_pair(transaction)
+
+        merchant_key = build_merchant_key(transaction.description)
+
         if transaction.mcc is not None:
-            merchant_key = build_merchant_key(transaction.description)
             mapping = await self.mappings.get(transaction.user_id, merchant_key, transaction.mcc)
-            if mapping is not None:
+            mapped_category = await self.categories.get_by_id(mapping.category_id) if mapping else None
+            if mapped_category is not None and _mapping_fits_direction(mapped_category.kind, transaction.amount):
                 # A mapping learned from a low-confidence AI guess still gets
                 # used (so the same merchant doesn't keep re-triggering AI
                 # calls), but the transaction inherits that same low-confidence
@@ -78,15 +99,14 @@ class CategorizationService:
                 )
                 return
 
-        rule_slug = self._determine_rule_category_slug(transaction)
-        if rule_slug is not None:
-            await self._try_link_transfer_pair(transaction)
-            await self._apply_rule_category(transaction, rule_slug)
-            return
-
+        selectable = await self.categories.get_selectable_categories(
+            kinds=OUTGOING_KINDS if transaction.amount < 0 else None,
+        )
+        by_slug = {c.slug: c for c in selectable}
+        names = {c.id: c.name for c in selectable}
         candidates = [
-            CategorizationCandidate(slug=c.slug, name=c.name)
-            for c in await self.categories.get_selectable_categories()
+            CategorizationCandidate(slug=c.slug, name=c.name, kind=c.kind, parent_name=names.get(c.parent_id))
+            for c in selectable
         ]
 
         try:
@@ -96,44 +116,75 @@ class CategorizationService:
                 mcc_name=await self._get_mcc_name(transaction.mcc),
                 amount=transaction.amount,
                 counter_name=transaction.counter_name,
+                hints=await self._build_hints(transaction),
                 candidates=candidates,
             )
         except Exception as e:
             raise CategorizationAIError(f"AI classify() failed for transaction id={transaction_id}") from e
 
-        category = await self.categories.get_by_slug(result.category_slug)
+        category: Category | None = by_slug.get(result.category_slug) if result.category_slug else None
+        confidence = result.confidence
         if category is None:
             logger.warning(
-                "AI returned unknown category slug=%s, falling back to 'nevidome'",
-                result.category_slug,
+                "AI gave no usable category (slug=%s) for transaction id=%s, falling back to unknown",
+                result.category_slug, transaction.id,
             )
             category = await self.categories.get_unknown_category()
+            confidence = 0.0
 
-        is_confident = result.confidence >= CONFIDENCE_THRESHOLD
+        is_confident = confidence >= CONFIDENCE_THRESHOLD
         source = "ai" if is_confident else "ai_low_confidence"
 
         self.transactions.set_category(
             transaction,
             category_id=category.id,
             source=source,
-            confidence=result.confidence,
+            confidence=confidence,
         )
 
-        if transaction.mcc is not None:
+        if transaction.mcc is not None and _mapping_fits_direction(category.kind, transaction.amount):
             await self.mappings.upsert(
                 user_id=transaction.user_id,
                 merchant_key=merchant_key,
                 mcc=transaction.mcc,
                 category_id=category.id,
                 source=source,
-                confidence=result.confidence,
+                confidence=confidence,
             )
 
         await self.db.commit()
         logger.info(
             "Transaction categorized via AI id=%s category=%s confidence=%.2f source=%s",
-            transaction.id, category.slug, result.confidence, source,
+            transaction.id, category.slug, confidence, source,
         )
+
+    async def _build_hints(self, transaction) -> list[str]:
+        """Facts from our own data the AI can't see in the transaction
+        itself - mostly whether the money stays within the user's own
+        accounts, which decides transfer vs income/expense."""
+        hints: list[str] = []
+
+        if transaction.jar_id is not None:
+            jar = await self.jars.get_by_id_for_user(transaction.jar_id, transaction.user_id)
+            title = f" «{jar.title}»" if jar else ""
+            hints.append(f"This transaction is on the user's own jar (savings){title}.")
+        elif transaction.account_id is not None:
+            account = await self.accounts.get_by_id_for_user(transaction.account_id, transaction.user_id)
+            if account is not None and account.account_type == "fop":
+                hints.append("This is the user's FOP (sole proprietor) business account.")
+
+        if transaction.transfer_pair_id is not None:
+            hints.append(
+                "An opposite transaction for the same amount happened at the same time "
+                "on another of the user's own accounts or jars."
+            )
+
+        if transaction.counter_iban:
+            own_ibans = {a.iban for a in await self.accounts.list_for_user(transaction.user_id) if a.iban}
+            if transaction.counter_iban in own_ibans:
+                hints.append("The counterparty IBAN is one of the user's own accounts.")
+
+        return hints
 
     async def _get_mcc_name(self, mcc: int | None) -> str | None:
         if mcc is None:
@@ -142,11 +193,16 @@ class CategorizationService:
         return result.scalar_one_or_none()
 
     async def _try_link_transfer_pair(self, transaction) -> None:
+        if transaction.transfer_pair_id is not None:
+            return
+
         candidate = await self.transactions.find_unpaired_transfer_candidate(
             user_id=transaction.user_id,
             amount=-transaction.amount,
             time=transaction.time,
             exclude_id=transaction.id,
+            account_id=transaction.account_id,
+            jar_id=transaction.jar_id,
         )
         if candidate is None:
             return
@@ -156,39 +212,6 @@ class CategorizationService:
         logger.info(
             "Linked transfer pair: id=%s <-> id=%s",
             transaction.id, candidate.id,
-        )
-
-    @staticmethod
-    def _determine_rule_category_slug(transaction) -> str | None:
-        if transaction.jar_id is not None:
-            return JAR_MOVEMENT_CATEGORY_SLUG
-        if transaction.mcc is None or transaction.mcc in TRANSFER_MCC_CODES:
-            # Monobank's own "Credit До завтра" product uses this same
-            # transfer MCC for both drawing and repaying the loan, so without
-            # this check every loan movement was getting lumped into generic
-            # "Перекази" instead of the dedicated loan categories.
-            description = (transaction.description or "").strip().lower()
-            if description.startswith("погашення"):
-                return LOAN_REPAYMENT_CATEGORY_SLUG
-            if description.startswith("кредит"):
-                return LOAN_DRAW_CATEGORY_SLUG
-            return TRANSFER_MCC_CATEGORY_SLUG
-        return None
-
-    async def _apply_rule_category(self, transaction, category_slug: str) -> None:
-        category = await self.categories.get_by_slug(category_slug)
-        if category is None:
-            logger.error(
-                "Rule category slug=%s is missing from the database, skipping transaction id=%s",
-                category_slug, transaction.id,
-            )
-            return
-
-        self.transactions.set_category(transaction, category_id=category.id, source="rule")
-        await self.db.commit()
-        logger.info(
-            "Transaction categorized by rule id=%s category=%s",
-            transaction.id, category.slug,
         )
 
     async def mark_categorization_failed(self, transaction_id: int) -> None:
@@ -217,7 +240,9 @@ class CategorizationService:
 
         self.transactions.set_category(transaction, category_id=category.id, source="user")
 
-        if transaction.mcc is not None:
+        # A refund re-labelled by hand says nothing about the merchant's
+        # purchases, so it doesn't overwrite the merchant's mapping.
+        if transaction.mcc is not None and _mapping_fits_direction(category.kind, transaction.amount):
             merchant_key = build_merchant_key(transaction.description)
             await self.mappings.upsert(
                 user_id=transaction.user_id,

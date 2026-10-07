@@ -5,6 +5,7 @@ class CategoryBrief(BaseModel):
     id: int
     name: str
     slug: str
+    kind: str
 
     model_config = ConfigDict(from_attributes=True)
 

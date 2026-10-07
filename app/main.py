@@ -9,6 +9,7 @@ logging.basicConfig(level=logging.INFO)
 from app.api.accounts import router as accounts_router
 from app.api.auth import router as auth_router
 from app.api.budgets import router as budgets_router
+from app.api.categories import router as categories_router
 from app.api.merchant_mappings import router as merchant_mappings_router
 from app.api.transactions import router as transactions_router
 from app.api.user_connect import router as monobank_router, run_statement_backfill
@@ -64,6 +65,7 @@ app.include_router(accounts_router)
 app.include_router(transactions_router)
 app.include_router(merchant_mappings_router)
 app.include_router(budgets_router)
+app.include_router(categories_router)
 
 
 if __name__ == '__main__':

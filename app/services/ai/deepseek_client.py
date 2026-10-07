@@ -23,9 +23,10 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
         mcc_name: str | None,
         amount: int,
         counter_name: str | None,
+        hints: list[str],
         candidates: list[CategorizationCandidate],
     ) -> CategorizationResult:
-        user_prompt = build_user_prompt(description, mcc_name, amount, counter_name, candidates)
+        user_prompt = build_user_prompt(description, mcc_name, amount, counter_name, hints, candidates)
 
         response = await self._client.chat.completions.create(
             model=DEEPSEEK_MODEL,
@@ -50,6 +51,6 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
         candidate_slugs = {c.slug for c in candidates}
         if slug not in candidate_slugs:
             logger.warning("DeepSeek returned a slug not in the candidate list: %r", slug)
-            confidence = 0.0
+            return CategorizationResult(category_slug=None, confidence=0.0)
 
-        return CategorizationResult(category_slug=slug or "nevidome", confidence=confidence)
+        return CategorizationResult(category_slug=slug, confidence=confidence)
