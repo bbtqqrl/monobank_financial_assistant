@@ -18,6 +18,7 @@ export type BalanceCardData = {
   balance: number;
   currency: number;
   account: string;
+  spent?: string;
 };
 
 const SIDE = 20;

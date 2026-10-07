@@ -1,24 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
 
 import { api } from './client';
 
 // GET /accounts, same fields as the backend's AccountResponse
-export type Account = {
-  id: number;
-  mono_account_id: string;
-  account_type: string;
-  currency_code: number;
-  balance: number;
-  credit_limit: number;
-  masked_pan: string | null;
-  iban: string | null;
-  is_active: boolean;
-};
+const AccountSchema = z.object({
+  id: z.number().int(),
+  mono_account_id: z.string(),
+  account_type: z.string(),
+  currency_code: z.number().int(),
+  // minor units, includes the credit limit
+  balance: z.number().int(),
+  credit_limit: z.number().int(),
+  masked_pan: z.string().nullable(),
+  iban: z.string().nullable(),
+  is_active: z.boolean(),
+});
+
+export type Account = z.infer<typeof AccountSchema>;
 
 export function useAccounts() {
-  return useQuery({ queryKey: ['accounts'], queryFn: () => api<Account[]>('/accounts') });
+  return useQuery({ queryKey: ['accounts'], queryFn: () => api(z.array(AccountSchema), '/accounts') });
 }
 
 // monobank card types
@@ -66,4 +71,10 @@ export function accountLabel(a: Account) {
   const name = CURRENCY_NAMES[a.currency_code] ?? CARD_NAMES[a.account_type] ?? 'Рахунок';
   const last4 = a.masked_pan?.slice(-4);
   return last4 ? `${name} · ${last4}` : name;
+}
+
+// undefined until accounts load: amounts can't be labelled before that
+export function useAccountCurrencies(): Map<number, number> | undefined {
+  const { data } = useAccounts();
+  return useMemo(() => data && new Map(data.map((a) => [a.id, a.currency_code])), [data]);
 }
