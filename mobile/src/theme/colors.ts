@@ -8,6 +8,8 @@ const light = {
   muted: '#837C74',
   faint: '#9C948B',
   ghost: '#A49B91',
+  // small labels straight on the coloured backdrop, ghost is too faint there
+  onBackdrop: '#625A52',
   cream: '#FBF8F3',
   accent: '#3A50B4',
   accentText: '#2D3E8C',
@@ -50,6 +52,7 @@ const dark: Colors = {
   muted: '#B0A8A0',
   faint: '#9E968E',
   ghost: '#999189',
+  onBackdrop: '#A8A099',
   cream: '#FBF8F3',
   accent: '#7C8FE8',
   accentText: '#7C8FE8',

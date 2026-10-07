@@ -1,22 +1,35 @@
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { router } from 'expo-router';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { Platform, StyleSheet, View } from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccountCurrencies } from '@/api/accounts';
-import { txCurrency, useTransactionPages, type Transaction, type TxType } from '@/api/transactions';
-import { formatMoney, UAH } from '@/lib/money';
-import { clockLabel, dayKey, dayLabel } from '@/lib/time';
-import { txRow } from '@/lib/txRow';
+import { useAllTransactions, useOldestMonth, useTransactionPages, type TxType } from '@/api/transactions';
+import { periodDays, periodFlow } from '@/lib/flow';
 import { goBack } from '@/lib/nav';
-import { DayGroup } from '@/ui/DayGroup';
+import { monthName, periodRange, rangeLabel, type Period } from '@/lib/period';
+import { listJump, listPeriod } from '@/lib/periods';
+import { Backdrop } from '@/ui/Backdrop';
 import { EmptyState } from '@/ui/EmptyState';
 import { FilterPills } from '@/ui/FilterPills';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
 import type { IconName } from '@/ui/icons/Icon';
-import { ScrollBackdrop } from '@/ui/ScrollBackdrop';
-import { Text } from '@/ui/Text';
+import { MonthCard } from '@/ui/MonthCard';
+import { MonthStrip } from '@/ui/MonthStrip';
+import { Pill, PillRow } from '@/ui/Pill';
+import { TxList, type MonthKey, type TxListHandle } from '@/ui/TxList';
 
 type Filter = 'all' | TxType;
 
@@ -28,140 +41,222 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 const EMPTY: Record<Filter, { icon: IconName; title: string; caption: string }> = {
-  all: { icon: 'list', title: 'Транзакцій ще немає', caption: 'Щойно monobank надішле операції, вони зʼявляться тут' },
-  expense: { icon: 'cart', title: 'Витрат немає', caption: 'Тут зʼявляться твої покупки' },
-  income: { icon: 'income', title: 'Доходів немає', caption: 'Зарахування й поповнення зʼявляться тут' },
-  transfer: { icon: 'repeat', title: 'Переказів немає', caption: 'Переказів між власними рахунками ще не було' },
+  all: { icon: 'list', title: 'Транзакцій немає', caption: 'Тут зʼявляться твої операції' },
+  expense: { icon: 'cart', title: 'Витрат немає', caption: 'Покупок не знайшлося' },
+  income: { icon: 'income', title: 'Доходів немає', caption: 'Зарахувань не знайшлося' },
+  transfer: { icon: 'repeat', title: 'Переказів немає', caption: 'Переказів не знайшлося' },
 };
 
-type Day = { key: string; label: string; items: Transaction[] };
+// how long the pill ignores scrolling after a tap, while the list flies there
+const JUMP_LOCK_MS = 900;
+// capsule height and the gap above it
+const STRIP_SPACE = 48;
+// roughly the filters and the first month card
+const STRIP_AFTER = 190;
 
-// pages come newest first, so a day's transactions are always next to each other
-function byDay(items: Transaction[]): Day[] {
-  const days: Day[] = [];
-  // offset pages overlap when a new transaction lands between fetches
-  const seen = new Set<number>();
-  for (const t of items) {
-    if (seen.has(t.id)) continue;
-    seen.add(t.id);
-    const key = dayKey(t.time);
-    const last = days[days.length - 1];
-    if (last?.key === key) last.items.push(t);
-    else days.push({ key, label: dayLabel(t.time), items: [t] });
+const openSheet = () => router.push({ pathname: '/period', params: { for: 'list' } });
+
+const sameMonth = (a: MonthKey, b: MonthKey) => a.year === b.year && a.month === b.month;
+
+// oldest first, up to this month
+function monthsSince(oldest: MonthKey | null | undefined): MonthKey[] {
+  const now = new Date();
+  const start = oldest ?? { year: now.getFullYear(), month: now.getMonth() };
+  const out: MonthKey[] = [];
+  for (let d = new Date(start.year, start.month, 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+    out.push({ year: d.getFullYear(), month: d.getMonth() });
   }
-  return days;
+  return out;
+}
+
+function MonthSummary({ year, month, onPress }: MonthKey & { onPress: () => void }) {
+  const period: Period = { kind: 'month', year, month };
+  return (
+    <PeriodSummary period={period} title={monthName(new Date(year, month, 1))} aside={String(year)} onPress={onPress} />
+  );
+}
+
+function PeriodSummary({ period, title, aside, onPress }: {
+  period: Period;
+  title: string;
+  aside?: string;
+  onPress: () => void;
+}) {
+  const all = useAllTransactions(periodRange(period));
+  const currencies = useAccountCurrencies();
+  const flow = useMemo(
+    () => (all.data && currencies ? periodFlow(all.data, currencies) : undefined),
+    [all.data, currencies],
+  );
+  return <MonthCard title={title} aside={aside} flow={flow} days={periodDays(period)} onPress={onPress} />;
 }
 
 export default function TransactionsScreen() {
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>('all');
-  const list = useTransactionPages(filter === 'all' ? undefined : filter);
-  const currencies = useAccountCurrencies();
-  const top = 11 + (Platform.OS === 'android' ? insets.top : 0);
-  const offset = useSharedValue(Platform.OS === 'ios' ? -insets.top : 0);
-  const onScroll = useAnimatedScrollHandler((e) => {
-    offset.set(e.contentOffset.y);
-  });
+  const period = listPeriod.useValue();
+  const custom = period.kind === 'custom' ? period : null;
+  const list = useTransactionPages({ type: filter === 'all' ? undefined : filter, ...periodRange(period) });
+  const oldest = useOldestMonth();
+  const months = useMemo(() => monthsSince(oldest.data), [oldest.data]);
+  const listRef = useRef<TxListHandle>(null);
+  const [overlayH, setOverlayH] = useState(0);
+  const [active, setActive] = useState<MonthKey>(() => months[months.length - 1]!);
+  // a month to scroll to once it's loaded
+  const pending = useRef<MonthKey | null>(null);
+  const [tries, setTries] = useState(0);
+  const lockedUntil = useRef(0);
+  const scrollY = useSharedValue(Platform.OS === 'ios' ? -insets.top : 0);
+  const [stripShown, setStripShown] = useState(false);
 
-  const days = useMemo(
-    () => (currencies && list.data ? byDay(list.data.pages.flatMap((p) => p.items)) : []),
-    [currencies, list.data],
+  // each visit starts as the plain feed
+  useEffect(
+    () => () => {
+      listPeriod.set({ kind: 'all' });
+      listJump.set(null);
+    },
+    [],
   );
 
-  // a day total only makes sense in one currency, so it sums the hryvnia part
-  const total = (items: Transaction[], cur: Map<number, number>) => {
-    const sum = items.filter((t) => txCurrency(t, cur) === UAH).reduce((acc, t) => acc + t.amount, 0);
-    // also hides days where a transfer out and back cancel out
-    return sum === 0 ? undefined : formatMoney(sum, UAH, { cents: false });
+  const goTo = (m: MonthKey) => {
+    setActive(m);
+    lockedUntil.current = Date.now() + JUMP_LOCK_MS;
+    pending.current = m;
+    setTries((n) => n + 1);
   };
 
-  const header = (
-    <View style={styles.top}>
-      <ScrollBackdrop variant="warm" offset={offset} style={{ top: -top, left: -SIDE }} />
-      <Header
-        title="Транзакції"
-        left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
-        right={{ icon: 'search', label: 'Пошук' }}
-      />
-      <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
-    </View>
+  // a month picked in the period sheet
+  useEffect(
+    () =>
+      listJump.subscribe(() => {
+        const m = listJump.get();
+        if (!m) return;
+        listJump.set(null);
+        goTo(m);
+      }),
+    [],
   );
 
-  const empty = list.isPending || !currencies ? (
-    <ActivityIndicator style={styles.loading} />
-  ) : list.isError ? (
-    <Glass contentStyle={styles.error}>
-      <Text tone="danger">Не вдалося завантажити транзакції</Text>
-      <Pressable accessibilityRole="button" hitSlop={8} onPress={() => list.refetch()}>
-        <Text variant="link" tone="accentText">
-          Спробувати ще
-        </Text>
-      </Pressable>
-    </Glass>
-  ) : (
-    <Glass>
-      <EmptyState {...EMPTY[filter]} />
-    </Glass>
+  // scroll once the month is loaded, pulling more pages until it is
+  const tryJump = useEffectEvent(() => {
+    const m = pending.current;
+    if (!m) return;
+    if (listRef.current?.scrollToMonth(m)) {
+      lockedUntil.current = Date.now() + JUMP_LOCK_MS;
+      pending.current = null;
+    } else if (list.hasNextPage && !list.isFetchingNextPage) {
+      list.fetchNextPage();
+    } else if (!list.hasNextPage && !list.isFetching) {
+      pending.current = null;
+    }
+  });
+  useEffect(() => {
+    tryJump();
+  }, [tries, list.data, list.isFetchingNextPage]);
+
+  // the strip shows up once the first month card has gone under the header
+  const rest = Platform.OS === 'ios' ? -insets.top : 0;
+  const shown = useDerivedValue(() => (scrollY.value > rest + STRIP_AFTER ? 1 : 0));
+  const reveal = useDerivedValue(() => withTiming(shown.value, { duration: 220 }));
+  useAnimatedReaction(
+    () => shown.value,
+    (now, before) => {
+      if (now !== before) scheduleOnRN(setStripShown, now === 1);
+    },
+  );
+  const stripStyle = useAnimatedStyle(() => ({
+    opacity: reveal.value,
+    transform: [{ translateY: (1 - reveal.value) * -10 }, { scale: 0.96 + reveal.value * 0.04 }],
+  }));
+  const fadeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [rest, rest + 24], [0, 1], Extrapolation.CLAMP),
+  }));
+
+  const monthHeader = useCallback((m: MonthKey) => <MonthSummary year={m.year} month={m.month} onPress={openSheet} />, []);
+
+  const activeIndex = Math.max(
+    0,
+    months.findIndex((m) => sameMonth(m, active)),
   );
 
   return (
     <View style={styles.screen}>
-      <Animated.FlatList
-        data={days}
-        keyExtractor={(d) => d.key}
-        renderItem={({ item }) =>
-          currencies ? (
-            <DayGroup
-              label={item.label}
-              total={total(item.items, currencies)}
-              rows={item.items.map((t) => txRow(t, currencies, clockLabel(t.time)))}
-            />
-          ) : null
-        }
-        ListHeaderComponent={header}
-        ListEmptyComponent={empty}
-        ListFooterComponent={
-          list.isFetchingNextPage ? (
-            <ActivityIndicator style={styles.more} />
-          ) : list.isFetchNextPageError ? (
-            <Pressable accessibilityRole="button" style={styles.more} onPress={() => list.fetchNextPage()}>
-              <Text variant="link" tone="accentText" style={styles.retry}>
-                Не вдалося довантажити · Спробувати ще
-              </Text>
-            </Pressable>
-          ) : null
-        }
-        ItemSeparatorComponent={Gap}
-        onEndReached={() => {
-          if (list.hasNextPage && !list.isFetchingNextPage && !list.isFetchNextPageError) list.fetchNextPage();
+      <TxList
+        ref={listRef}
+        list={list}
+        overlayHeight={overlayH}
+        floatingHeight={custom ? 0 : STRIP_SPACE}
+        scrollY={scrollY}
+        monthHeader={custom ? undefined : monthHeader}
+        onTopMonth={(m) => {
+          if (Date.now() < lockedUntil.current || sameMonth(m, active)) return;
+          setActive(m);
         }}
-        onEndReachedThreshold={0.6}
-        refreshControl={
-          <RefreshControl refreshing={list.isRefetching && !list.isFetchingNextPage} onRefresh={() => list.refetch()} />
+        header={
+          <View style={styles.listHeader}>
+            {custom ? (
+              <>
+                <PillRow>
+                  <Pill
+                    label={rangeLabel(custom.from, custom.to)}
+                    icon="calendar"
+                    active
+                    onPress={openSheet}
+                    onClear={() => listPeriod.set({ kind: 'all' })}
+                  />
+                </PillRow>
+                <PeriodSummary period={custom} title={rangeLabel(custom.from, custom.to)} onPress={openSheet} />
+              </>
+            ) : null}
+            <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
+          </View>
         }
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[styles.content, { paddingTop: top }]}
+        empty={
+          <Glass>
+            <EmptyState {...EMPTY[filter]} />
+          </Glass>
+        }
       />
+
+      {/* No bar behind the header: the same backdrop is drawn again on top and
+          faded out downwards, so the list just melts away under the title. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.fade, { height: overlayH + (custom ? 0 : STRIP_SPACE) + 28 }, fadeStyle]}
+      >
+        <MaskedView style={StyleSheet.absoluteFill} maskElement={<View style={[StyleSheet.absoluteFill, styles.mask]} />}>
+          <Backdrop variant="warm" />
+        </MaskedView>
+      </Animated.View>
+      <View
+        pointerEvents="box-none"
+        style={[styles.header, { paddingTop: insets.top + 11 }]}
+        onLayout={(e) => setOverlayH(e.nativeEvent.layout.height)}
+      >
+        <Header
+          title="Транзакції"
+          left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
+          right={{ icon: 'search', label: 'Пошук', onPress: () => router.push('/search') }}
+        />
+      </View>
+      {custom ? null : (
+        <Animated.View
+          pointerEvents={stripShown ? 'box-none' : 'none'}
+          style={[styles.strip, { top: overlayH }, stripStyle]}
+        >
+          <MonthStrip months={months} active={activeIndex} onPick={(i) => goTo(months[i]!)} />
+        </Animated.View>
+      )}
     </View>
   );
 }
 
-function Gap() {
-  return <View style={styles.gap} />;
-}
-
-const SIDE = 20;
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  // Figma: 14 between blocks on this screen
-  top: { gap: 14, marginBottom: 14 },
-  content: { paddingHorizontal: SIDE, paddingBottom: 24 },
-  gap: { height: 14 },
-  loading: { paddingVertical: 40 },
-  more: { paddingVertical: 20 },
-  retry: { textAlign: 'center' },
-  error: { padding: 16, gap: 8 },
+  fade: { position: 'absolute', top: 0, left: 0, right: 0 },
+  mask: { experimental_backgroundImage: 'linear-gradient(to bottom, #000 0%, #000 55%, transparent 100%)' },
+  header: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 20, paddingBottom: 8 },
+  strip: { position: 'absolute', left: 20, right: 20, alignItems: 'center' },
+  listHeader: { gap: 14 },
 });

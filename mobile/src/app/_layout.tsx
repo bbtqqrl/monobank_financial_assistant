@@ -49,10 +49,6 @@ export default function RootLayout() {
           <Stack.Screen name="profile" />
           <Stack.Screen name="transaction/[id]" />
         </Stack.Protected>
-        <Stack.Protected guard={signedIn && __DEV__}>
-          <Stack.Screen name="dev/smoke" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="dev/kit" options={{ presentation: 'modal' }} />
-        </Stack.Protected>
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="login" />
         </Stack.Protected>
