@@ -279,8 +279,11 @@ def upgrade() -> None:
     # 3. Split "Перекази".
     if OLD_TRANSFERS in ids:
         old_id = ids[OLD_TRANSFERS]
+        # asyncpg can't infer parameter types inside CASE and sends them as
+        # text, hence the explicit casts.
         bind.execute(sa.text("""
-            UPDATE transactions SET category_id = CASE WHEN amount < 0 THEN :out ELSE :in END
+            UPDATE transactions
+            SET category_id = CASE WHEN amount < 0 THEN CAST(:out AS INTEGER) ELSE CAST(:in AS INTEGER) END
             WHERE category_id = :old AND category_source = 'user'
         """), {'old': old_id, 'out': ids[TRANSFERS_OUT], 'in': ids[TRANSFERS_IN]})
         bind.execute(sa.text("""
