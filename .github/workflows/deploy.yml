@@ -34,8 +34,11 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            docker compose up -d --build
-            docker compose exec -T api alembic upgrade head
+            docker compose build api                             
+            docker compose up -d db                              
+            docker compose run --rm api alembic upgrade head     
+            docker compose up -d                                 
+
 
             docker image prune -f
             docker builder prune -f
