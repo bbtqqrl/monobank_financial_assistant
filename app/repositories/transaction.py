@@ -1,14 +1,13 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
 from app.db.models.transaction import TransactionRaw
 from app.schemas.monobank import MonoTransactionSchema
-from app.services.transfer_mcc import TRANSFER_MCC_CODES
 
 
 class TransactionRepository:
@@ -63,12 +62,10 @@ class TransactionRepository:
             conditions.append(TransactionRaw.account_id == account_id)
         if jar_id is not None:
             conditions.append(TransactionRaw.jar_id == jar_id)
-        if type_ in ("expense", "income"):
-            conditions.append(TransactionRaw.amount < 0 if type_ == "expense" else TransactionRaw.amount > 0)
-            conditions.append(TransactionRaw.mcc.is_not(None))
-            conditions.append(TransactionRaw.mcc.not_in(TRANSFER_MCC_CODES))
-        elif type_ == "transfer":
-            conditions.append(or_(TransactionRaw.mcc.is_(None), TransactionRaw.mcc.in_(TRANSFER_MCC_CODES)))
+        if type_ is not None:
+            # By the category's kind; an expense-kind refund shows up under
+            # "expense", where it offsets spending.
+            conditions.append(Category.kind == type_)
         if date_from is not None:
             conditions.append(TransactionRaw.time >= date_from)
         if date_to is not None:
@@ -101,8 +98,12 @@ class TransactionRepository:
         amount: int,
         time: int,
         exclude_id: int,
+        account_id: int | None,
+        jar_id: int | None,
         window_seconds: int = 5,
     ) -> Optional[TransactionRaw]:
+        """The other leg of a move between two of the user's own accounts or
+        jars: opposite amount, a few seconds apart, on a different holder."""
         result = await self.db.execute(
             select(TransactionRaw)
             .where(
@@ -111,6 +112,10 @@ class TransactionRepository:
                 TransactionRaw.amount == amount,
                 TransactionRaw.transfer_pair_id.is_(None),
                 TransactionRaw.time.between(time - window_seconds, time + window_seconds),
+                ~and_(
+                    TransactionRaw.account_id.is_not_distinct_from(account_id),
+                    TransactionRaw.jar_id.is_not_distinct_from(jar_id),
+                ),
             )
             .limit(1)
         )

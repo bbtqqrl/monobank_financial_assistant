@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import CheckConstraint, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -10,6 +10,15 @@ if TYPE_CHECKING:
     from app.db.models.budget import Budget
     from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.transaction import TransactionRaw
+
+
+# What a transaction in the category means for the user's money:
+#   expense  - spent (a positive amount here is a refund and offsets spending)
+#   income   - received from outside
+#   transfer - the user's own money moving (between own accounts, jars, cash,
+#              currency exchange, loans) - neither income nor expense
+#   unknown  - the fallback when nothing fits; counted by the amount's sign
+CATEGORY_KINDS = ("expense", "income", "transfer", "unknown")
 
 
 class Category(Base):
@@ -24,6 +33,9 @@ class Category(Base):
         index=True,
         nullable=False,
     )
+
+    # A child always has its parent's kind.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
@@ -52,4 +64,11 @@ class Category(Base):
 
     budgets: Mapped[list["Budget"]] = relationship(
         back_populates="category",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('expense', 'income', 'transfer', 'unknown')",
+            name="ck_categories_kind",
+        ),
     )

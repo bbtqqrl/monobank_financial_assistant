@@ -16,7 +16,7 @@ class MockCategorizationAIClient(CategorizationAIClient):
         mcc_name: str | None,
         amount: int,
         counter_name: str | None,
+        hints: list[str],
         candidates: list[CategorizationCandidate],
     ) -> CategorizationResult:
-        fallback = next((c for c in candidates if c.slug == "nevidome"), candidates[0])
-        return CategorizationResult(category_slug=fallback.slug, confidence=0.0)
+        return CategorizationResult(category_slug=None, confidence=0.0)

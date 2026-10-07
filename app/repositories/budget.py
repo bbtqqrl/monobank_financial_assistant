@@ -58,8 +58,9 @@ class BudgetRepository:
     async def spent_by_category(
         self, user_id: int, category_ids: list[int], from_ts: int, to_ts: int,
     ) -> dict[int, int]:
-        """Expenses (as positive kopecks) per category within [from_ts, to_ts).
-        Only negative amounts count, same as a budget has always treated them."""
+        """Net spending (as positive kopecks) per category within
+        [from_ts, to_ts). Refunds - positive amounts in an expense category -
+        offset it; a month with more refunds than spending reports 0."""
         if not category_ids:
             return {}
 
@@ -68,13 +69,12 @@ class BudgetRepository:
             .where(
                 TransactionRaw.user_id == user_id,
                 TransactionRaw.category_id.in_(category_ids),
-                TransactionRaw.amount < 0,
                 TransactionRaw.time >= from_ts,
                 TransactionRaw.time < to_ts,
             )
             .group_by(TransactionRaw.category_id)
         )
-        return {category_id: int(total) for category_id, total in result.all()}
+        return {category_id: max(int(total), 0) for category_id, total in result.all()}
 
     @staticmethod
     def update_amount(budget: Budget, amount: int) -> None:

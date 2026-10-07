@@ -19,10 +19,11 @@ class CategoryRepository:
         result = await self.db.execute(select(Category).where(Category.id == category_id))
         return result.scalar_one_or_none()
 
-    async def get_selectable_categories(self) -> list[Category]:
-        result = await self.db.execute(
-            select(Category).where(Category.is_active.is_(True)).order_by(Category.id)
-        )
+    async def get_selectable_categories(self, kinds: tuple[str, ...] | None = None) -> list[Category]:
+        query = select(Category).where(Category.is_active.is_(True))
+        if kinds is not None:
+            query = query.where(Category.kind.in_(kinds))
+        result = await self.db.execute(query.order_by(Category.id))
         return list(result.scalars().all())
 
     async def get_selectable_by_id(self, category_id: int) -> Optional[Category]:
@@ -32,7 +33,10 @@ class CategoryRepository:
         return result.scalar_one_or_none()
 
     async def get_unknown_category(self) -> Category:
-        category = await self.get_by_slug("nevidome")
+        result = await self.db.execute(
+            select(Category).where(Category.kind == "unknown", Category.is_active.is_(True)).limit(1)
+        )
+        category = result.scalar_one_or_none()
         if category is None:
-            raise RuntimeError("Fallback category 'nevidome' is missing from the database")
+            raise RuntimeError("No active category of kind 'unknown' in the database")
         return category

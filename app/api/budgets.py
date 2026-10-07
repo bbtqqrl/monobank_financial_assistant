@@ -51,6 +51,8 @@ async def create_budget(
     category = await CategoryRepository(db).get_selectable_by_id(data.category_id)
     if category is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found or not selectable")
+    if category.kind != "expense":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Budgets can only be set on expense categories")
 
     repo = BudgetRepository(db)
     try:

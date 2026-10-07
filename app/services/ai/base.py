@@ -13,6 +13,7 @@ class CategorizationAIClient(ABC):
         mcc_name: str | None,
         amount: int,
         counter_name: str | None,
+        hints: list[str],
         candidates: list[CategorizationCandidate],
     ) -> CategorizationResult:
         ...
