@@ -24,7 +24,7 @@ export function DayGroup({ label, total, rows }: Props) {
   return (
     <View style={styles.group}>
       <View style={styles.head}>
-        <Text variant="labelCaps" tone="ghost">
+        <Text variant="labelCaps" tone="onBackdrop">
           {label}
         </Text>
         {total ? (

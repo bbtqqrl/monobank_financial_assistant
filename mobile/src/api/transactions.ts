@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type Que
 import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
+import { isoDate, parseIso } from '@/lib/period';
 
 import { api } from './client';
 
@@ -44,34 +45,67 @@ const PageSchema = z.object({ items: z.array(TransactionSchema), page: int, limi
 
 export type Transaction = z.infer<typeof TransactionSchema>;
 export type TransactionDetail = z.infer<typeof TransactionDetailSchema>;
-type Page = z.infer<typeof PageSchema>;
+export type TxPage = z.infer<typeof PageSchema>;
+type Page = TxPage;
 
 export type TxType = 'expense' | 'income' | 'transfer';
 
-function listUrl(type: TxType | undefined, limit: number, page = 1) {
+export type TxFilters = {
+  type?: TxType;
+  // matched against the description on the backend
+  search?: string;
+  // 'YYYY-MM-DD', inclusive, in the phone's time zone
+  from?: string;
+  to?: string;
+};
+
+function shiftDay(day: string, by: number) {
+  const d = parseIso(day);
+  return isoDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() + by));
+}
+
+// The backend reads from/to as Kyiv days, so it's asked for a day more on
+// each side and the edges are cut here by the phone's own clock.
+function listUrl({ type, search, from, to }: TxFilters, limit: number, page = 1) {
   const params = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (type) params.set('type', type);
+  if (search) params.set('search', search);
+  if (from) params.set('from', shiftDay(from, -1));
+  if (to) params.set('to', shiftDay(to, 1));
   return `/transactions?${params}`;
+}
+
+function inRange(t: Transaction, { from, to }: TxFilters) {
+  const ms = t.time * 1000;
+  if (from && ms < parseIso(from).getTime()) return false;
+  if (to && ms >= parseIso(shiftDay(to, 1)).getTime()) return false;
+  return true;
 }
 
 // first page only, for short lists like "Останні транзакції"
 export function useTransactions({ type, limit = 30 }: { type?: TxType; limit?: number } = {}) {
   return useQuery({
     queryKey: ['transactions', { type, limit }],
-    queryFn: () => api(PageSchema, listUrl(type, limit)),
+    queryFn: () => api(PageSchema, listUrl({ type }, limit)),
     select: (page) => page.items,
   });
 }
 
-const PAGE_SIZE = 50;
+// the backend allows up to 100
+const PAGE_SIZE = 100;
 
 // the full list, loaded page by page while scrolling
-export function useTransactionPages(type?: TxType) {
+export function useTransactionPages(filters: TxFilters, enabled = true) {
   return useInfiniteQuery({
-    queryKey: ['transactions', 'pages', { type }],
-    queryFn: ({ pageParam }) => api(PageSchema, listUrl(type, PAGE_SIZE, pageParam)),
+    queryKey: ['transactions', 'pages', filters],
+    enabled,
+    queryFn: ({ pageParam }) => api(PageSchema, listUrl(filters, PAGE_SIZE, pageParam)),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page * last.limit < last.total ? last.page + 1 : undefined),
+    select: (data) =>
+      filters.from || filters.to
+        ? { ...data, pages: data.pages.map((p) => ({ ...p, items: p.items.filter((t) => inRange(t, filters)) })) }
+        : data,
   });
 }
 
@@ -109,27 +143,62 @@ export function foreignPart(t: Transaction, accountCurrency: Map<number, number>
   return { amount: t.operation_amount, currency: t.currency_code };
 }
 
-function monthStart(now: Date) {
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  return `${now.getFullYear()}-${mm}-01`;
-}
 
 export function useMonthSpend() {
-  const from = monthStart(new Date());
+  const now = new Date();
+  const filters: TxFilters = { type: 'expense', from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)) };
   return useQuery({
-    queryKey: ['month-spend', from],
+    queryKey: ['month-spend', filters.from],
     queryFn: async () => {
       const spent = new Map<number, number>();
       const seen = new Set<number>();
       for (let page = 1; ; page++) {
-        const p = await api(PageSchema, `/transactions?type=expense&from=${from}&limit=100&page=${page}`);
+        const p = await api(PageSchema, listUrl(filters, 100, page));
         for (const t of p.items) {
-          if (t.account_id === null || seen.has(t.id)) continue;
+          if (t.account_id === null || seen.has(t.id) || !inRange(t, filters)) continue;
           seen.add(t.id);
           spent.set(t.account_id, (spent.get(t.account_id) ?? 0) - t.amount);
         }
         if (page * p.limit >= p.total) return spent;
       }
+    },
+  });
+}
+
+const MAX_SUM_PAGES = 20;
+
+// Every transaction matching the filters, for period sums under the list.
+// Kept out of the 'transactions' key like the month spend. Stops at 2000.
+export function useAllTransactions(filters: TxFilters, enabled = true) {
+  return useQuery({
+    queryKey: ['tx-all', filters],
+    enabled,
+    queryFn: async () => {
+      const byId = new Map<number, Transaction>();
+      for (let page = 1; page <= MAX_SUM_PAGES; page++) {
+        const p = await api(PageSchema, listUrl(filters, 100, page));
+        for (const t of p.items) if (inRange(t, filters)) byId.set(t.id, t);
+        if (page * p.limit >= p.total) break;
+      }
+      return [...byId.values()];
+    },
+  });
+}
+
+// The month of the oldest transaction, so the month strip knows where to start.
+// Two small requests: the first page tells the total, the last one the date.
+export function useOldestMonth() {
+  return useQuery({
+    queryKey: ['tx-oldest'],
+    staleTime: 60 * 60_000,
+    queryFn: async () => {
+      const first = await api(PageSchema, listUrl({}, 1));
+      if (first.total === 0) return null;
+      const last = await api(PageSchema, listUrl({}, 1, first.total));
+      const t = last.items[0] ?? first.items[0];
+      if (!t) return null;
+      const d = new Date(t.time * 1000);
+      return { year: d.getFullYear(), month: d.getMonth() };
     },
   });
 }

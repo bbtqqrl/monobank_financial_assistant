@@ -1,10 +1,9 @@
-import { Link } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
 import { signOut } from '@/api/auth';
 import { goBack } from '@/lib/nav';
-import { TEXT, useTheme, withAlpha } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { pickTheme } from '@/theme/pickTheme';
 import { THEME_LABELS, useThemePref } from '@/theme/preference';
 import { Glass } from '@/ui/Glass';
@@ -13,12 +12,6 @@ import { Icon } from '@/ui/icons/Icon';
 import { Screen } from '@/ui/Screen';
 import { SettingRow } from '@/ui/SettingRow';
 import { Text } from '@/ui/Text';
-
-// TODO: dev shortcuts, remove before release
-const DEV_LINKS = [
-  { label: 'Перевірки', href: '/dev/smoke' },
-  { label: 'UI kit', href: '/dev/kit' },
-] as const;
 
 export default function ProfileScreen() {
   const { c } = useTheme();
@@ -63,18 +56,6 @@ export default function ProfileScreen() {
         )}
       </Pressable>
 
-      {__DEV__ && (
-        <View style={styles.dev}>
-          <Text variant="labelCaps" tone="ghost">
-            Розробка
-          </Text>
-          {DEV_LINKS.map((l) => (
-            <Link key={l.label} href={l.href} style={[TEXT.bodyStrong, { color: c.accentText }]}>
-              {l.label} →
-            </Link>
-          ))}
-        </View>
-      )}
     </Screen>
   );
 }
@@ -92,5 +73,4 @@ const styles = StyleSheet.create({
   },
   logoutLabel: { fontSize: 14 },
   pressed: { opacity: 0.6 },
-  dev: { paddingTop: 24, gap: 12 },
 });

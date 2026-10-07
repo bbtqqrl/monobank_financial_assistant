@@ -2,7 +2,16 @@ import { Text as RNText, type TextProps } from 'react-native';
 
 import { TEXT, useTheme, type TextVariant } from '@/theme';
 
-export type Tone = 'ink' | 'inkSoft' | 'muted' | 'faint' | 'ghost' | 'accentText' | 'onPrimary' | 'danger';
+export type Tone =
+  | 'ink'
+  | 'inkSoft'
+  | 'muted'
+  | 'faint'
+  | 'ghost'
+  | 'onBackdrop'
+  | 'accentText'
+  | 'onPrimary'
+  | 'danger';
 
 type Props = TextProps & {
   variant?: TextVariant;
