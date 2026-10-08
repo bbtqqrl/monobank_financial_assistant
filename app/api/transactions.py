@@ -21,7 +21,12 @@ from app.schemas.transaction import (
     UpdateManualTransactionRequest,
     UpdateTransactionCategoryRequest,
 )
-from app.services.categorization_service import CategorizationService, NotManualTransactionError
+from app.services.categorization_service import (
+    CategorizationService,
+    CategoryDirectionError,
+    NotManualTransactionError,
+    check_category_fits_amount,
+)
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -112,10 +117,13 @@ async def create_transaction(
         if jar is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jar not found")
 
-    if data.category_id is not None:
-        category = await CategoryRepository(db).get_selectable_by_id(data.category_id)
-        if category is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found or not selectable")
+    category = await CategoryRepository(db).get_selectable_by_id(data.category_id)
+    if category is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found or not selectable")
+    try:
+        check_category_fits_amount(category.kind, data.amount)
+    except CategoryDirectionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     transactions = TransactionRepository(db)
     transaction = await transactions.create_manual(
@@ -127,16 +135,9 @@ async def create_transaction(
         currency_code=data.currency_code,
         time=data.time if data.time is not None else int(datetime.now(timezone.utc).timestamp()),
         comment=data.comment,
+        category_id=category.id,
     )
     await db.commit()
-
-    if data.category_id is not None:
-        service = CategorizationService(db)
-        await service.apply_user_category(
-            transaction_id=transaction.id,
-            user_id=current_user.id,
-            category_id=data.category_id,
-        )
 
     row = await transactions.get_detail_for_user(transaction.id, current_user.id)
     transaction, category = row
@@ -199,6 +200,8 @@ async def update_manual_transaction(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only manually created transactions can be edited",
         )
+    except CategoryDirectionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found")
 
@@ -254,6 +257,8 @@ async def update_transaction_category(
             user_id=current_user.id,
             category_id=data.category_id,
         )
+    except CategoryDirectionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found")
 

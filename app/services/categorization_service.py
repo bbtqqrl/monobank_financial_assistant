@@ -33,6 +33,17 @@ class NotManualTransactionError(Exception):
     transaction, which must stay a faithful copy of the bank's record."""
 
 
+class CategoryDirectionError(ValueError):
+    """Raised when a user picks an income category for money going out."""
+
+
+def check_category_fits_amount(kind: str, amount: int) -> None:
+    """Outgoing money is never income. The opposite is allowed: a positive
+    amount in an expense category is a refund."""
+    if kind == "income" and amount < 0:
+        raise CategoryDirectionError("An income category needs a positive amount")
+
+
 def _mapping_fits_direction(kind: str, amount: int) -> bool:
     """A mapping is keyed by merchant, not by direction. One learned from a
     purchase (expense) must not label money coming back from that merchant -
@@ -237,6 +248,7 @@ class CategorizationService:
         category = await self.categories.get_selectable_by_id(category_id)
         if category is None:
             raise ValueError("Category not found or not selectable")
+        check_category_fits_amount(category.kind, transaction.amount)
 
         self.transactions.set_category(transaction, category_id=category.id, source="user")
 
@@ -282,6 +294,11 @@ class CategorizationService:
             category = await self.categories.get_selectable_by_id(category_id)
             if category is None:
                 raise ValueError("Category not found or not selectable")
+
+        # Either side may change, so check the pair the transaction ends up with.
+        final_category = category or await self.categories.get_by_id(transaction.category_id)
+        if final_category is not None:
+            check_category_fits_amount(final_category.kind, amount if amount is not None else transaction.amount)
 
         self.transactions.update_manual_fields(
             transaction, description=description, amount=amount, comment=comment, time=time,

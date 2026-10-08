@@ -6,17 +6,19 @@ export type Flow = {
   // minor units, hryvnia part only; spent is negative
   spent: number;
   income: number;
-  // 'YYYY-MM-DD' → spent that day (positive)
+  // 'YYYY-MM-DD' → spent that day, less refunds
   daily: Map<string, number>;
 };
 
-// Money in and out for a period. Moves between your own accounts (the backend
-// pairs them) are neither spending nor income, so they're left out.
+// Money in and out for a period, by the category's kind. The user's own money
+// moving (own accounts, jars, cash) is neither and is left out; a refund in a
+// spending category lowers the spending instead of counting as income.
 export function periodFlow(items: Transaction[], currencies: Map<number, number>): Flow {
   const flow: Flow = { spent: 0, income: 0, daily: new Map() };
   for (const t of items) {
-    if (t.transfer_pair_id !== null || txCurrency(t, currencies) !== UAH) continue;
-    if (t.amount > 0) {
+    const kind = t.category?.kind ?? 'unknown';
+    if (kind === 'transfer' || t.transfer_pair_id !== null || txCurrency(t, currencies) !== UAH) continue;
+    if (kind === 'income' || (kind === 'unknown' && t.amount > 0)) {
       flow.income += t.amount;
       continue;
     }

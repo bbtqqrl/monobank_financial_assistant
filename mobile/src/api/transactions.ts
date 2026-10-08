@@ -1,9 +1,11 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
-import { isoDate, parseIso } from '@/lib/period';
+import { isoDate, parseIso, type MonthKey } from '@/lib/period';
 
+import { CategoryBriefSchema } from './categories';
 import { api } from './client';
 
 const int = z.number().int();
@@ -25,7 +27,7 @@ const TransactionSchema = z.object({
   account_id: int.nullable(),
   jar_id: int.nullable(),
   transfer_pair_id: int.nullable(),
-  category: z.object({ id: int, name: z.string(), slug: z.string() }).nullable(),
+  category: CategoryBriefSchema.nullable(),
   // ai, ai_low_confidence, mapping, mapping_low_confidence, rule, user, ai_failed
   category_source: z.string().nullable(),
   category_confidence: z.number().nullable(),
@@ -57,6 +59,7 @@ export type TxFilters = {
   // 'YYYY-MM-DD', inclusive, in the phone's time zone
   from?: string;
   to?: string;
+  category?: number;
 };
 
 function shiftDay(day: string, by: number) {
@@ -66,10 +69,11 @@ function shiftDay(day: string, by: number) {
 
 // The backend reads from/to as Kyiv days, so it's asked for a day more on
 // each side and the edges are cut here by the phone's own clock.
-function listUrl({ type, search, from, to }: TxFilters, limit: number, page = 1) {
+function listUrl({ type, search, from, to, category }: TxFilters, limit: number, page = 1) {
   const params = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (type) params.set('type', type);
   if (search) params.set('search', search);
+  if (category !== undefined) params.set('category_id', String(category));
   if (from) params.set('from', shiftDay(from, -1));
   if (to) params.set('to', shiftDay(to, 1));
   return `/transactions?${params}`;
@@ -155,7 +159,8 @@ export function useMonthSpend() {
       for (let page = 1; ; page++) {
         const p = await api(PageSchema, listUrl(filters, 100, page));
         for (const t of p.items) {
-          if (t.account_id === null || seen.has(t.id) || !inRange(t, filters)) continue;
+          // a move between own accounts isn't spending, whatever its category
+          if (t.account_id === null || t.transfer_pair_id !== null || seen.has(t.id) || !inRange(t, filters)) continue;
           seen.add(t.id);
           spent.set(t.account_id, (spent.get(t.account_id) ?? 0) - t.amount);
         }
@@ -187,18 +192,76 @@ export function useAllTransactions(filters: TxFilters, enabled = true) {
 
 // The month of the oldest transaction, so the month strip knows where to start.
 // Two small requests: the first page tells the total, the last one the date.
-export function useOldestMonth() {
+export function useOldestMonth(category?: number) {
   return useQuery({
-    queryKey: ['tx-oldest'],
-    staleTime: 60 * 60_000,
+    queryKey: ['tx-oldest', category],
     queryFn: async () => {
-      const first = await api(PageSchema, listUrl({}, 1));
+      const first = await api(PageSchema, listUrl({ category }, 1));
       if (first.total === 0) return null;
-      const last = await api(PageSchema, listUrl({}, 1, first.total));
+      const last = await api(PageSchema, listUrl({ category }, 1, first.total));
       const t = last.items[0] ?? first.items[0];
       if (!t) return null;
       const d = new Date(t.time * 1000);
       return { year: d.getFullYear(), month: d.getMonth() };
     },
   });
+}
+
+const monthId = (m: MonthKey) => `${m.year}-${m.month}`;
+
+// Which of these months have any transactions, so empty ones can't be picked.
+// One small request per month; the backend has no per-month summary yet.
+export function useActiveMonths(months: MonthKey[], category?: number) {
+  return useQuery({
+    queryKey: ['tx-active-months', months.map(monthId), category],
+    enabled: months.length > 0,
+    queryFn: async () => {
+      const found = await Promise.all(
+        months.map(async (m) => {
+          const range = {
+            from: isoDate(new Date(m.year, m.month, 1)),
+            to: isoDate(new Date(m.year, m.month + 1, 0)),
+            category,
+          };
+          // the request is a day wider on each side, a neighbour's edge day fits in 100
+          const p = await api(PageSchema, listUrl(range, 100));
+          return p.items.some((t) => inRange(t, range)) ? monthId(m) : null;
+        }),
+      );
+      return new Set(found.filter((id): id is string => id !== null));
+    },
+    select: (ids) => (m: MonthKey) => ids.has(monthId(m)),
+  });
+}
+
+const order = (m: MonthKey) => m.year * 12 + m.month;
+
+// every month from the first transaction up to now, oldest first
+function monthsFrom(start: MonthKey): MonthKey[] {
+  const now = new Date();
+  const out: MonthKey[] = [];
+  for (let d = new Date(start.year, start.month, 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+    out.push({ year: d.getFullYear(), month: d.getMonth() });
+  }
+  return out;
+}
+
+// The months to offer for picking, and which of them have anything in them.
+// `loaded` is the oldest month already on screen, in case history grew since.
+export function useFeedMonths(loaded?: MonthKey, category?: number) {
+  const oldest = useOldestMonth(category);
+  const now = new Date();
+  const candidates = [oldest.data, loaded].filter((m): m is MonthKey => !!m);
+  const start = candidates.reduce<MonthKey>((a, b) => (order(b) < order(a) ? b : a), {
+    year: now.getFullYear(),
+    month: now.getMonth(),
+  });
+  const startId = `${start.year}-${start.month}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const months = useMemo(() => monthsFrom(start), [startId]);
+  const active = useActiveMonths(months, category);
+  const isEnabled = (m: MonthKey) =>
+    // this month is always there; the rest once known
+    (m.year === now.getFullYear() && m.month === now.getMonth()) || (active.data?.(m) ?? true);
+  return { months, isEnabled };
 }

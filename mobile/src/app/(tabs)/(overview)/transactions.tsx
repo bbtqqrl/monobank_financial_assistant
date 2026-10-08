@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import MaskedView from '@react-native-masked-view/masked-view';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -15,7 +15,9 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccountCurrencies } from '@/api/accounts';
-import { useAllTransactions, useOldestMonth, useTransactionPages, type TxType } from '@/api/transactions';
+import { useAllTransactions, useFeedMonths, useTransactionPages, type TxType } from '@/api/transactions';
+import { categoryLook } from '@/lib/categories';
+import { listCategory } from '@/lib/categoryFilter';
 import { periodDays, periodFlow } from '@/lib/flow';
 import { goBack } from '@/lib/nav';
 import { monthName, periodRange, rangeLabel, type Period } from '@/lib/period';
@@ -37,14 +39,14 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'Усі' },
   { key: 'expense', label: 'Витрати' },
   { key: 'income', label: 'Дохід' },
-  { key: 'transfer', label: 'Перекази' },
+  { key: 'transfer', label: 'Рух коштів' },
 ];
 
 const EMPTY: Record<Filter, { icon: IconName; title: string; caption: string }> = {
   all: { icon: 'list', title: 'Транзакцій немає', caption: 'Тут зʼявляться твої операції' },
   expense: { icon: 'cart', title: 'Витрат немає', caption: 'Покупок не знайшлося' },
   income: { icon: 'income', title: 'Доходів немає', caption: 'Зарахувань не знайшлося' },
-  transfer: { icon: 'repeat', title: 'Переказів немає', caption: 'Переказів не знайшлося' },
+  transfer: { icon: 'transfer', title: 'Порожньо', caption: 'Переказів між своїми рахунками не знайшлося' },
 };
 
 // how long the pill ignores scrolling after a tap, while the list flies there
@@ -55,34 +57,32 @@ const STRIP_SPACE = 48;
 const STRIP_AFTER = 190;
 
 const openSheet = () => router.push({ pathname: '/period', params: { for: 'list' } });
+const openCategories = () => router.push('/category');
 
 const sameMonth = (a: MonthKey, b: MonthKey) => a.year === b.year && a.month === b.month;
 
-// oldest first, up to this month
-function monthsSince(oldest: MonthKey | null | undefined): MonthKey[] {
-  const now = new Date();
-  const start = oldest ?? { year: now.getFullYear(), month: now.getMonth() };
-  const out: MonthKey[] = [];
-  for (let d = new Date(start.year, start.month, 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
-    out.push({ year: d.getFullYear(), month: d.getMonth() });
-  }
-  return out;
-}
-
-function MonthSummary({ year, month, onPress }: MonthKey & { onPress: () => void }) {
+function MonthSummary({ year, month, category, onPress }: MonthKey & { category?: number; onPress: () => void }) {
   const period: Period = { kind: 'month', year, month };
   return (
-    <PeriodSummary period={period} title={monthName(new Date(year, month, 1))} aside={String(year)} onPress={onPress} />
+    <PeriodSummary
+      period={period}
+      title={monthName(new Date(year, month, 1))}
+      aside={String(year)}
+      category={category}
+      onPress={onPress}
+    />
   );
 }
 
-function PeriodSummary({ period, title, aside, onPress }: {
+function PeriodSummary({ period, title, aside, category, onPress }: {
   period: Period;
   title: string;
   aside?: string;
+  // the sums follow the list when it's narrowed to a category
+  category?: number;
   onPress: () => void;
 }) {
-  const all = useAllTransactions(periodRange(period));
+  const all = useAllTransactions({ ...periodRange(period), category });
   const currencies = useAccountCurrencies();
   const flow = useMemo(
     () => (all.data && currencies ? periodFlow(all.data, currencies) : undefined),
@@ -96,9 +96,18 @@ export default function TransactionsScreen() {
   const [filter, setFilter] = useState<Filter>('all');
   const period = listPeriod.useValue();
   const custom = period.kind === 'custom' ? period : null;
-  const list = useTransactionPages({ type: filter === 'all' ? undefined : filter, ...periodRange(period) });
-  const oldest = useOldestMonth();
-  const months = useMemo(() => monthsSince(oldest.data), [oldest.data]);
+  const category = listCategory.useValue();
+  const categoryId = category?.id;
+  const list = useTransactionPages({
+    type: filter === 'all' ? undefined : filter,
+    ...periodRange(period),
+    category: categoryId,
+  });
+  const lastItem = list.data?.pages.at(-1)?.items.at(-1);
+  const loadedOldest = lastItem
+    ? { year: new Date(lastItem.time * 1000).getFullYear(), month: new Date(lastItem.time * 1000).getMonth() }
+    : undefined;
+  const { months, isEnabled } = useFeedMonths(custom ? undefined : loadedOldest, categoryId);
   const listRef = useRef<TxListHandle>(null);
   const [overlayH, setOverlayH] = useState(0);
   const [active, setActive] = useState<MonthKey>(() => months[months.length - 1]!);
@@ -114,9 +123,13 @@ export default function TransactionsScreen() {
     () => () => {
       listPeriod.set({ kind: 'all' });
       listJump.set(null);
+      listCategory.set(null);
     },
     [],
   );
+
+  // a category already says what kind of money it is
+  useEffect(() => listCategory.subscribe(() => setFilter('all')), []);
 
   const goTo = (m: MonthKey) => {
     setActive(m);
@@ -172,7 +185,10 @@ export default function TransactionsScreen() {
     opacity: interpolate(scrollY.value, [rest, rest + 24], [0, 1], Extrapolation.CLAMP),
   }));
 
-  const monthHeader = useCallback((m: MonthKey) => <MonthSummary year={m.year} month={m.month} onPress={openSheet} />, []);
+  const monthHeader = useCallback(
+    (m: MonthKey) => <MonthSummary year={m.year} month={m.month} category={categoryId} onPress={openSheet} />,
+    [categoryId],
+  );
 
   const activeIndex = Math.max(
     0,
@@ -194,9 +210,9 @@ export default function TransactionsScreen() {
         }}
         header={
           <View style={styles.listHeader}>
-            {custom ? (
-              <>
-                <PillRow>
+            {custom || category ? (
+              <PillRow wrap>
+                {custom ? (
                   <Pill
                     label={rangeLabel(custom.from, custom.to)}
                     icon="calendar"
@@ -204,16 +220,51 @@ export default function TransactionsScreen() {
                     onPress={openSheet}
                     onClear={() => listPeriod.set({ kind: 'all' })}
                   />
-                </PillRow>
-                <PeriodSummary period={custom} title={rangeLabel(custom.from, custom.to)} onPress={openSheet} />
-              </>
+                ) : null}
+                {category ? (
+                  <Pill
+                    label={category.name}
+                    icon={categoryLook(category.slug, -1).icon}
+                    active
+                    onPress={openCategories}
+                    onClear={() => listCategory.set(null)}
+                  />
+                ) : null}
+              </PillRow>
             ) : null}
-            <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
+            {custom ? (
+              <PeriodSummary
+                period={custom}
+                title={rangeLabel(custom.from, custom.to)}
+                category={categoryId}
+                onPress={openSheet}
+              />
+            ) : null}
+            <View style={styles.filters}>
+              {/* scrolls only where the pills don't fit (SE, large text) */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.types}
+                contentContainerStyle={styles.typesContent}
+              >
+                <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
+              </ScrollView>
+              <Pill icon="filter" accessibilityLabel="Категорія" active={!!category} onPress={openCategories} />
+            </View>
           </View>
         }
         empty={
           <Glass>
-            <EmptyState {...EMPTY[filter]} />
+            <EmptyState
+              {...(category
+                ? {
+                    icon: categoryLook(category.slug, -1).icon,
+                    title: 'Транзакцій немає',
+                    caption: `У категорії «${category.name}» нічого не знайшлося`,
+                  }
+                : EMPTY[filter])}
+            />
           </Glass>
         }
       />
@@ -244,7 +295,7 @@ export default function TransactionsScreen() {
           pointerEvents={stripShown ? 'box-none' : 'none'}
           style={[styles.strip, { top: overlayH }, stripStyle]}
         >
-          <MonthStrip months={months} active={activeIndex} onPick={(i) => goTo(months[i]!)} />
+          <MonthStrip months={months} active={activeIndex} onPick={(i) => goTo(months[i]!)} isEnabled={isEnabled} />
         </Animated.View>
       )}
     </View>
@@ -259,4 +310,8 @@ const styles = StyleSheet.create({
   header: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 20, paddingBottom: 8 },
   strip: { position: 'absolute', left: 20, right: 20, alignItems: 'center' },
   listHeader: { gap: 14 },
+  filters: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // room for the active pill's shadow, which the scroll view would clip
+  types: { flex: 1, marginVertical: -14, marginLeft: -20 },
+  typesContent: { paddingVertical: 14, paddingLeft: 20 },
 });

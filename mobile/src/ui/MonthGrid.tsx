@@ -12,10 +12,14 @@ type Props = {
   year?: number;
   month?: number;
   onPick: (year: number, month: number) => void;
+  // months with no transactions can't be picked
+  isEnabled?: (m: { year: number; month: number }) => boolean;
+  // no years before this one
+  minYear?: number;
 };
 
 // Year switcher and a 4×3 grid of months; future months are disabled
-export function MonthGrid({ year, month, onPick }: Props) {
+export function MonthGrid({ year, month, onPick, isEnabled, minYear }: Props) {
   const { c, dark } = useTheme();
   const now = new Date();
   const [shown, setShown] = useState(year ?? now.getFullYear());
@@ -23,7 +27,12 @@ export function MonthGrid({ year, month, onPick }: Props) {
   return (
     <View style={styles.box}>
       <View style={styles.years}>
-        <StepButton dir="prev" label="Попередній рік" onPress={() => setShown(shown - 1)} />
+        <StepButton
+          dir="prev"
+          label="Попередній рік"
+          onPress={() => setShown(shown - 1)}
+          disabled={minYear !== undefined && shown <= minYear}
+        />
         <Text variant="screenTitle" style={styles.year}>
           {shown}
         </Text>
@@ -42,12 +51,13 @@ export function MonthGrid({ year, month, onPick }: Props) {
               const i = row * 3 + k;
               const selected = shown === year && i === month;
               const future = shown > now.getFullYear() || (shown === now.getFullYear() && i > now.getMonth());
+              const off = future || !(isEnabled?.({ year: shown, month: i }) ?? true);
               return (
                 <Pressable
                   key={name}
                   accessibilityRole="button"
-                  accessibilityState={{ selected, disabled: future }}
-                  disabled={future}
+                  accessibilityState={{ selected, disabled: off }}
+                  disabled={off}
                   onPress={() => onPick(shown, i)}
                   style={({ pressed }) => [
                     styles.tile,
@@ -59,7 +69,7 @@ export function MonthGrid({ year, month, onPick }: Props) {
                           { boxShadow: `0 8px 18px -8px ${withAlpha(c.shadow, 0.6)}` },
                         ]
                       : {
-                          backgroundColor: withAlpha(c.white, whiteAlpha(future ? 0.5 : 0.72, dark)),
+                          backgroundColor: withAlpha(c.white, whiteAlpha(off ? 0.5 : 0.72, dark)),
                           borderColor: withAlpha(c.shade, 0.07),
                           borderWidth: 1,
                         },
@@ -68,7 +78,7 @@ export function MonthGrid({ year, month, onPick }: Props) {
                 >
                   <Text
                     variant="bodyStrong"
-                    style={[styles.name, { color: selected ? c.onPrimary : future ? c.ghost : c.ink }]}
+                    style={[styles.name, { color: selected ? c.onPrimary : off ? c.ghost : c.ink }]}
                   >
                     {name}
                   </Text>

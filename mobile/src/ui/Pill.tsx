@@ -7,7 +7,9 @@ import { Icon, type IconName } from '@/ui/icons/Icon';
 import { Text } from '@/ui/Text';
 
 type Props = {
-  label: string;
+  // left out for an icon-only pill, which then needs accessibilityLabel
+  label?: string;
+  accessibilityLabel?: string;
   active?: boolean;
   icon?: IconName;
   onPress?: () => void;
@@ -17,7 +19,7 @@ type Props = {
 };
 
 // Filter pill: light glass, or filled like the primary button when active
-export function Pill({ label, active = false, icon, onPress, onClear, role = 'button' }: Props) {
+export function Pill({ label, accessibilityLabel, active = false, icon, onPress, onClear, role = 'button' }: Props) {
   const { c, dark } = useTheme();
   const tone = active ? c.onPrimary : c.category.neutral;
 
@@ -37,14 +39,23 @@ export function Pill({ label, active = false, icon, onPress, onClear, role = 'bu
   return (
     <Pressable
       accessibilityRole={role}
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      style={({ pressed }) => [styles.pill, onClear && styles.clearable, look, pressed && !active && styles.pressed]}
+      style={({ pressed }) => [
+        styles.pill,
+        !label && styles.square,
+        onClear && styles.clearable,
+        look,
+        pressed && !active && styles.pressed,
+      ]}
     >
-      {icon ? <Icon name={icon} size={14} color={tone} weight={1.9} /> : null}
-      <Text variant="body" style={[styles.label, active && styles.labelOn, { color: tone }]}>
-        {label}
-      </Text>
+      {icon ? <Icon name={icon} size={label ? 14 : 17} color={tone} weight={1.9} /> : null}
+      {label ? (
+        <Text variant="body" style={[styles.label, active && styles.labelOn, { color: tone }]}>
+          {label}
+        </Text>
+      ) : null}
       {onClear ? (
         <Pressable
           accessibilityRole="button"
@@ -76,6 +87,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  square: { width: 34, paddingHorizontal: 0 },
   clearable: { paddingRight: 8 },
   pressed: { opacity: 0.6 },
   label: { fontSize: 13 },

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from typing import TYPE_CHECKING
@@ -107,4 +107,14 @@ class TransactionRaw(Base):
 
     merchant_mapping: Mapped["MerchantCategoryMapping | None"] = relationship(
         back_populates="transactions",
+    )
+
+    __table_args__ = (
+        # Monobank transactions start uncategorized and get a category in the
+        # background; a manual one is created by the user and has to come
+        # with one, since nothing else will ever categorize it.
+        CheckConstraint(
+            "source <> 'manual' OR category_id IS NOT NULL",
+            name="ck_transactions_manual_has_category",
+        ),
     )
