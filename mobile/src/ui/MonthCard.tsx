@@ -150,7 +150,7 @@ function Bars({ days, daily }: { days: string[]; daily?: Map<string, number> }) 
         <Bar
           key={day}
           // square root, so one big purchase doesn't flatten every other day
-          ratio={daily ? Math.sqrt((daily.get(day) ?? 0) / max) : 0}
+          ratio={daily ? Math.sqrt(Math.max(0, daily.get(day) ?? 0) / max) : 0}
           future={day > today}
           today={day === today}
         />

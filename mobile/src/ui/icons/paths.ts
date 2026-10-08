@@ -139,6 +139,10 @@ export const ICONS = {
     ['path', { d: 'M20 7H9a4 4 0 0 0 0 8h6a4 4 0 0 1 0 8H4' }],
     ['path', { d: 'M17 4l3 3-3 3' }],
   ],
+  transfer: [
+    ['path', { d: 'M4 8h15M15 4l4 4-4 4' }],
+    ['path', { d: 'M20 16H5M9 12l-4 4 4 4' }],
+  ],
   close: [
     ['path', { d: 'M6 6l12 12M18 6 6 18' }],
   ],
