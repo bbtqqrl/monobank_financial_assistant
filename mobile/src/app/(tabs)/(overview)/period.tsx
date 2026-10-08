@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { rangeDays, rangeLabel } from '@/lib/period';
+import { useFeedMonths } from '@/api/transactions';
 import { listJump, periodStore } from '@/lib/periods';
 import { plural } from '@/lib/plural';
 import { useTheme, withAlpha } from '@/theme';
@@ -30,6 +31,7 @@ export default function PeriodSheet() {
   const forList = params.for === 'list';
   const store = periodStore(forList ? 'list' : 'search');
   const current = store.useValue();
+  const { months, isEnabled } = useFeedMonths();
 
   const [tab, setTab] = useState<Tab>(forList && current.kind !== 'custom' ? 'month' : 'custom');
   const [from, setFrom] = useState(current.kind === 'custom' ? current.from : undefined);
@@ -43,7 +45,7 @@ export default function PeriodSheet() {
         ? `${rangeLabel(from, end)} · ${plural(rangeDays(from, end), ['день', 'дні', 'днів'])}`
         : 'Обери перший і останній день';
 
-  const close = () => router.back();
+  const close = () => (router.canGoBack() ? router.back() : router.replace('/transactions'));
 
   return (
     <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -70,6 +72,8 @@ export default function PeriodSheet() {
       {tab === 'month' ? (
         <>
           <MonthGrid
+            isEnabled={isEnabled}
+            minYear={months[0]?.year}
             onPick={(year, month) => {
               store.set({ kind: 'all' });
               listJump.set({ year, month });

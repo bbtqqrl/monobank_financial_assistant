@@ -44,7 +44,7 @@ export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
   const toggle = () => setHidden((h) => !h);
 
   if (cards.length < 2) {
-    const card = cards[0];
+    const { key: _key, ...card } = cards[0] ?? { key: 0 };
     return <BalanceCard {...card} hidden={hidden} onToggleHidden={toggle} />;
   }
 
@@ -61,8 +61,8 @@ export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
         style={styles.row}
         contentContainerStyle={styles.content}
       >
-        {cards.map((card) => (
-          <BalanceCard {...card} key={card.key} hidden={hidden} onToggleHidden={toggle} style={{ width: cardWidth }} />
+        {cards.map(({ key, ...card }) => (
+          <BalanceCard {...card} key={key} hidden={hidden} onToggleHidden={toggle} style={{ width: cardWidth }} />
         ))}
       </Animated.ScrollView>
       <View style={styles.dots}>

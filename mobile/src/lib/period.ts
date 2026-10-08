@@ -5,6 +5,9 @@ export type Period =
   | { kind: 'month'; year: number; month: number }
   | { kind: 'custom'; from: string; to: string };
 
+// month is 0-based, like Date
+export type MonthKey = { year: number; month: number };
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // local 'YYYY-MM-DD', what the backend's from/to expect

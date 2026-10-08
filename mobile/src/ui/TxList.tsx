@@ -36,6 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccountCurrencies } from '@/api/accounts';
 import type { TxPage } from '@/api/transactions';
 import { byDay, dayTotal, type Day } from '@/lib/days';
+import type { MonthKey } from '@/lib/period';
 import { clockLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
 import type { BackdropVariant } from '@/ui/Backdrop';
@@ -44,7 +45,7 @@ import { Glass } from '@/ui/Glass';
 import { ScrollBackdrop } from '@/ui/ScrollBackdrop';
 import { Text } from '@/ui/Text';
 
-export type MonthKey = { year: number; month: number };
+export type { MonthKey };
 
 export type TxListHandle = {
   // false when that month isn't loaded yet

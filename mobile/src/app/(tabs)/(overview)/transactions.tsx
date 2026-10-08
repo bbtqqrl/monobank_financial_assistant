@@ -15,7 +15,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccountCurrencies } from '@/api/accounts';
-import { useAllTransactions, useOldestMonth, useTransactionPages, type TxType } from '@/api/transactions';
+import { useAllTransactions, useFeedMonths, useTransactionPages, type TxType } from '@/api/transactions';
 import { periodDays, periodFlow } from '@/lib/flow';
 import { goBack } from '@/lib/nav';
 import { monthName, periodRange, rangeLabel, type Period } from '@/lib/period';
@@ -58,17 +58,6 @@ const openSheet = () => router.push({ pathname: '/period', params: { for: 'list'
 
 const sameMonth = (a: MonthKey, b: MonthKey) => a.year === b.year && a.month === b.month;
 
-// oldest first, up to this month
-function monthsSince(oldest: MonthKey | null | undefined): MonthKey[] {
-  const now = new Date();
-  const start = oldest ?? { year: now.getFullYear(), month: now.getMonth() };
-  const out: MonthKey[] = [];
-  for (let d = new Date(start.year, start.month, 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
-    out.push({ year: d.getFullYear(), month: d.getMonth() });
-  }
-  return out;
-}
-
 function MonthSummary({ year, month, onPress }: MonthKey & { onPress: () => void }) {
   const period: Period = { kind: 'month', year, month };
   return (
@@ -97,8 +86,11 @@ export default function TransactionsScreen() {
   const period = listPeriod.useValue();
   const custom = period.kind === 'custom' ? period : null;
   const list = useTransactionPages({ type: filter === 'all' ? undefined : filter, ...periodRange(period) });
-  const oldest = useOldestMonth();
-  const months = useMemo(() => monthsSince(oldest.data), [oldest.data]);
+  const lastItem = list.data?.pages.at(-1)?.items.at(-1);
+  const loadedOldest = lastItem
+    ? { year: new Date(lastItem.time * 1000).getFullYear(), month: new Date(lastItem.time * 1000).getMonth() }
+    : undefined;
+  const { months, isEnabled } = useFeedMonths(custom ? undefined : loadedOldest);
   const listRef = useRef<TxListHandle>(null);
   const [overlayH, setOverlayH] = useState(0);
   const [active, setActive] = useState<MonthKey>(() => months[months.length - 1]!);
@@ -244,7 +236,7 @@ export default function TransactionsScreen() {
           pointerEvents={stripShown ? 'box-none' : 'none'}
           style={[styles.strip, { top: overlayH }, stripStyle]}
         >
-          <MonthStrip months={months} active={activeIndex} onPick={(i) => goTo(months[i]!)} />
+          <MonthStrip months={months} active={activeIndex} onPick={(i) => goTo(months[i]!)} isEnabled={isEnabled} />
         </Animated.View>
       )}
     </View>

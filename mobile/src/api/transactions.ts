@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
-import { isoDate, parseIso } from '@/lib/period';
+import { isoDate, parseIso, type MonthKey } from '@/lib/period';
 
 import { api } from './client';
 
@@ -190,7 +191,6 @@ export function useAllTransactions(filters: TxFilters, enabled = true) {
 export function useOldestMonth() {
   return useQuery({
     queryKey: ['tx-oldest'],
-    staleTime: 60 * 60_000,
     queryFn: async () => {
       const first = await api(PageSchema, listUrl({}, 1));
       if (first.total === 0) return null;
@@ -201,4 +201,62 @@ export function useOldestMonth() {
       return { year: d.getFullYear(), month: d.getMonth() };
     },
   });
+}
+
+const monthId = (m: MonthKey) => `${m.year}-${m.month}`;
+
+// Which of these months have any transactions, so empty ones can't be picked.
+// One small request per month; the backend has no per-month summary yet.
+export function useActiveMonths(months: MonthKey[]) {
+  return useQuery({
+    queryKey: ['tx-active-months', months.map(monthId)],
+    enabled: months.length > 0,
+    queryFn: async () => {
+      const found = await Promise.all(
+        months.map(async (m) => {
+          const range = {
+            from: isoDate(new Date(m.year, m.month, 1)),
+            to: isoDate(new Date(m.year, m.month + 1, 0)),
+          };
+          // the request is a day wider on each side, a neighbour's edge day fits in 100
+          const p = await api(PageSchema, listUrl(range, 100));
+          return p.items.some((t) => inRange(t, range)) ? monthId(m) : null;
+        }),
+      );
+      return new Set(found.filter((id): id is string => id !== null));
+    },
+    select: (ids) => (m: MonthKey) => ids.has(monthId(m)),
+  });
+}
+
+const order = (m: MonthKey) => m.year * 12 + m.month;
+
+// every month from the first transaction up to now, oldest first
+function monthsFrom(start: MonthKey): MonthKey[] {
+  const now = new Date();
+  const out: MonthKey[] = [];
+  for (let d = new Date(start.year, start.month, 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+    out.push({ year: d.getFullYear(), month: d.getMonth() });
+  }
+  return out;
+}
+
+// The months to offer for picking, and which of them have anything in them.
+// `loaded` is the oldest month already on screen, in case history grew since.
+export function useFeedMonths(loaded?: MonthKey) {
+  const oldest = useOldestMonth();
+  const now = new Date();
+  const candidates = [oldest.data, loaded].filter((m): m is MonthKey => !!m);
+  const start = candidates.reduce<MonthKey>((a, b) => (order(b) < order(a) ? b : a), {
+    year: now.getFullYear(),
+    month: now.getMonth(),
+  });
+  const startId = `${start.year}-${start.month}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const months = useMemo(() => monthsFrom(start), [startId]);
+  const active = useActiveMonths(months);
+  const isEnabled = (m: MonthKey) =>
+    // this month is always there; the rest once known
+    (m.year === now.getFullYear() && m.month === now.getMonth()) || (active.data?.(m) ?? true);
+  return { months, isEnabled };
 }

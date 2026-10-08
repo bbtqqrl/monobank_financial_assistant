@@ -10,7 +10,7 @@ import Animated, {
 
 import { FONT } from '@/lib/fonts';
 import { monthName } from '@/lib/period';
-import { useTheme } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { Glass } from '@/ui/Glass';
 import { Text } from '@/ui/Text';
 import type { MonthKey } from '@/ui/TxList';
@@ -20,6 +20,8 @@ type Props = {
   months: MonthKey[];
   active: number;
   onPick: (index: number) => void;
+  // months with no transactions are shown faded and can't be picked
+  isEnabled?: (m: MonthKey) => boolean;
 };
 
 const H = 32;
@@ -29,7 +31,7 @@ const SPRING = { duration: 420, dampingRatio: 0.8 };
 const LAG_MS = 55;
 
 // Glass capsule of months with a pill sliding under the active one
-export function MonthStrip({ months, active, onPick }: Props) {
+export function MonthStrip({ months, active, onPick, isEnabled }: Props) {
   const { c, dark } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
@@ -53,7 +55,8 @@ export function MonthStrip({ months, active, onPick }: Props) {
   useEffect(() => {
     const l = layouts.current[active];
     if (!l || !placed) return;
-    const toLeft = l.x, toRight = l.x + l.w;
+    const toLeft = l.x,
+      toRight = l.x + l.w;
     if (reduceMotion) {
       left.set(toLeft);
       right.set(toRight);
@@ -87,28 +90,34 @@ export function MonthStrip({ months, active, onPick }: Props) {
         onContentSizeChange={(w) => setContentWidth(w)}
         style={{ width }}
       >
-        {months.map((m, i) => (
-          <Pressable
-            key={`${m.year}-${m.month}`}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: i === active }}
-            onPress={() => onPick(i)}
-            onLayout={(e) => {
-              const { x, width: w } = e.nativeEvent.layout;
-              layouts.current[i] = { x, w };
-              // first layout, or the months around it changed: snap, no animation
-              if (i === active) {
-                left.set(x);
-                right.set(x + w);
-                if (!placed) setPlaced(true);
-                requestAnimationFrame(() => centre(i, false));
-              }
-            }}
-            style={styles.item}
-          >
-            <Text style={[styles.label, { color: c.category.neutral }]}>{label(m)}</Text>
-          </Pressable>
-        ))}
+        {months.map((m, i) => {
+          const enabled = isEnabled?.(m) ?? true;
+          return (
+            <Pressable
+              key={`${m.year}-${m.month}`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: i === active, disabled: !enabled }}
+              disabled={!enabled}
+              onPress={() => onPick(i)}
+              onLayout={(e) => {
+                const { x, width: w } = e.nativeEvent.layout;
+                layouts.current[i] = { x, w };
+                // first layout, or the months around it changed: snap, no animation
+                if (i === active) {
+                  left.set(x);
+                  right.set(x + w);
+                  if (!placed) setPlaced(true);
+                  requestAnimationFrame(() => centre(i, false));
+                }
+              }}
+              style={styles.item}
+            >
+              <Text style={[styles.label, { color: enabled ? c.category.neutral : withAlpha(c.ghost, 0.55) }]}>
+                {label(m)}
+              </Text>
+            </Pressable>
+          );
+        })}
 
         <Animated.View pointerEvents="none" style={[styles.pill, fill, { opacity: placed ? 1 : 0 }, pill]}>
           <Animated.View style={[styles.row, { width: contentWidth }, inside]}>
