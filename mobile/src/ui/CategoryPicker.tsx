@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useCategories, type CategoryBrief, type CategoryKind, type CategoryNode } from '@/api/categories';
+import { toBrief, useCategories, type CategoryBrief, type CategoryKind, type CategoryNode } from '@/api/categories';
 import { categoryLook, type CategoryLook } from '@/lib/categories';
 import { Button } from '@/ui/Button';
 import { CategoryOption } from '@/ui/CategoryOption';
@@ -38,8 +38,6 @@ const ALL_LOOK: CategoryLook = { icon: 'list', color: 'neutral' };
 // apostrophes come in three spellings: кав'ярні, кав’ярні, кавʼярні
 const normalize = (s: string) => s.toLocaleLowerCase('uk').replace(/[’ʼ`]/g, "'").trim();
 
-const brief = ({ id, name, slug, kind }: CategoryBrief): CategoryBrief => ({ id, name, slug, kind });
-
 const look = (c: CategoryBrief) => categoryLook(c.slug, c.kind === 'income' ? 1 : -1);
 
 // Searchable category tree for a sheet. The iOS sheet sizes its scroll view
@@ -67,7 +65,7 @@ export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, ki
     selectedId,
     busyId,
     onPick: (category) => {
-      if (busyId === undefined) onPick(brief(category));
+      if (busyId === undefined) onPick(toBrief(category));
     },
   };
   const q = normalize(query);

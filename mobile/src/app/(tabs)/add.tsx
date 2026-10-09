@@ -1,5 +1,7 @@
-import { Stub } from '@/ui/Stub';
+import { Redirect } from 'expo-router';
 
+// The «+» tab never opens itself, it only shows the sheet (see the tabs
+// layout). This is for a link that lands here.
 export default function AddScreen() {
-  return <Stub title="Додати" note="Своя транзакція вручну — стане модальним вікном" />;
+  return <Redirect href="/new" />;
 }

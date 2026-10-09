@@ -39,6 +39,7 @@ import { byDay, dayTotal, type Day } from '@/lib/days';
 import type { MonthKey } from '@/lib/period';
 import { clockLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
+import { usePullRefresh } from '@/lib/usePullRefresh';
 import type { BackdropVariant } from '@/ui/Backdrop';
 import { DayGroup } from '@/ui/DayGroup';
 import { Glass } from '@/ui/Glass';
@@ -99,6 +100,7 @@ export function TxList({
   ref,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const pull = usePullRefresh(() => list.refetch());
   const currencies = useAccountCurrencies();
   const listRef = useRef<FlatList<Item>>(null);
   // iOS already insets the content by the status bar
@@ -276,8 +278,8 @@ export function TxList({
           CellRendererComponent={monthHeader ? Cell : undefined}
           refreshControl={
             <RefreshControl
-              refreshing={list.isRefetching && !list.isFetchingNextPage}
-              onRefresh={() => list.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               progressViewOffset={covered}
             />
           }

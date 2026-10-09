@@ -31,7 +31,10 @@ const LOOKS: [CategoryLook, string[]][] = [
   [{ icon: 'person', color: 'blue' }, ['perekazy-liudiam']],
   [{ icon: 'card', color: 'neutral' }, ['inshi-vytraty', 'nevidome']],
   // income
-  [{ icon: 'income', color: 'green' }, ['zarplata', 'pidpryiemnytstvo', 'derzhavni-vyplaty', 'prodazh-rechei', 'inshi-dokhody']],
+  [{ icon: 'income', color: 'green' }, ['zarplata', 'inshi-dokhody']],
+  [{ icon: 'laptop', color: 'green' }, ['pidpryiemnytstvo']],
+  [{ icon: 'list', color: 'green' }, ['derzhavni-vyplaty']],
+  [{ icon: 'cart', color: 'teal' }, ['prodazh-rechei']],
   [{ icon: 'person', color: 'green' }, ['perekazy-vid-liudei']],
   [{ icon: 'star', color: 'green' }, ['keshbek']],
   [{ icon: 'chart', color: 'green' }, ['vidsotky-ta-dyvidendy']],
