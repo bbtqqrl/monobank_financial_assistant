@@ -67,3 +67,8 @@ class MonoWebhookPayload(BaseModel):
 class MonobankRefreshResponse(BaseModel):
     accounts: list[AccountResponse]
     jars: list[JarResponse]
+    # What Monobank has on file for this token right now, and whether it's
+    # the URL this server expects. A mismatch means webhooks go elsewhere
+    # (another environment connected the same token) or nowhere.
+    webhook_url: str | None
+    webhook_registered: bool

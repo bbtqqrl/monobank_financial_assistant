@@ -23,7 +23,10 @@ class MonobankAPIClient:
         r.raise_for_status()
         return r.json()
     
-    async def register_webhook(self, token: str, webhook_url: str) -> dict:
+    async def register_webhook(self, token: str, webhook_url: str) -> None:
+        """Monobank checks the URL with a GET (expects a plain 200) before
+        accepting it. Success may come back with an empty body, so the
+        response isn't parsed."""
         client = await self._get_client()
         r = await client.post(
             f"{self.BASE_URL}/personal/webhook",
@@ -31,7 +34,6 @@ class MonobankAPIClient:
             json={"webHookUrl": webhook_url},
         )
         r.raise_for_status()
-        return r.json()
 
     async def get_statement(
         self, token: str, account_id: str, from_ts: int, to_ts: Optional[int] = None,
