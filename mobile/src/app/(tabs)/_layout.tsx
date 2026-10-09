@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { FONT } from '@/lib/fonts';
@@ -28,7 +29,8 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>Бюджети</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={icons.budgets} renderingMode="original" md="speed" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="add">
+      {/* not a tab: it opens the new transaction sheet over whatever is open */}
+      <NativeTabs.Trigger name="add" disabled listeners={{ tabPress: () => router.push('/new') }}>
         <NativeTabs.Trigger.Label>Додати</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={icons.add} renderingMode="original" md="add_circle" />
       </NativeTabs.Trigger>

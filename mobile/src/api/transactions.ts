@@ -1,12 +1,19 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
 import { isoDate, parseIso, type MonthKey } from '@/lib/period';
 
-import { CategoryBriefSchema } from './categories';
-import { api } from './client';
+import { CategoryBriefSchema, type CategoryBrief } from './categories';
+import { api, request } from './client';
 
 const int = z.number().int();
 
@@ -133,6 +140,75 @@ export function useTransaction(id: number) {
     queryFn: () => api(TransactionDetailSchema, `/transactions/${id}`),
     placeholderData: () => fromLists(qc, id),
     enabled: Number.isInteger(id),
+  });
+}
+
+// lists and sums a new or re-categorised transaction can show up in
+const AFFECTED = new Set(['transactions', 'tx-all', 'month-spend', 'tx-active-months', 'tx-oldest']);
+
+const refreshLists = (qc: QueryClient) =>
+  qc.invalidateQueries({ predicate: (q) => AFFECTED.has(String(q.queryKey[0])) });
+
+// POST /transactions: money the bank doesn't know about, like cash
+export type NewTransaction = {
+  description: string;
+  // minor units, negative = spent
+  amount: number;
+  currency_code: number;
+  category_id: number;
+  // null for cash
+  account_id: number | null;
+  // unix seconds
+  time: number;
+};
+
+export function useCreateTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tx: NewTransaction) => api(TransactionDetailSchema, '/transactions', { method: 'POST', body: tx }),
+    onSuccess: (detail) => qc.setQueryData(['transaction', detail.id], detail),
+    onSettled: () => refreshLists(qc),
+  });
+}
+
+// PATCH /transactions/{id}/category. The backend also remembers the choice for
+// the merchant (when there's an MCC), so later purchases there follow it.
+export function useSetCategory(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (category: CategoryBrief) =>
+      api(TransactionDetailSchema, `/transactions/${id}/category`, {
+        method: 'PATCH',
+        body: { category_id: category.id },
+      }),
+    // the details screen under the sheet changes right away
+    onMutate: async (category) => {
+      await qc.cancelQueries({ queryKey: ['transaction', id] });
+      const before = qc.getQueryData<TransactionDetail>(['transaction', id]);
+      if (before) {
+        qc.setQueryData<TransactionDetail>(['transaction', id], {
+          ...before,
+          category,
+          category_source: 'user',
+          category_confidence: null,
+        });
+      }
+      return { before };
+    },
+    onError: (_error, _category, context) => {
+      if (context?.before) qc.setQueryData(['transaction', id], context.before);
+    },
+    onSuccess: (detail) => qc.setQueryData(['transaction', id], detail),
+    onSettled: () => refreshLists(qc),
+  });
+}
+
+// DELETE /transactions/{id}, only for ones added by hand
+export function useDeleteTransaction(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => request(`/transactions/${id}`, { method: 'DELETE' }),
+    onSettled: () => refreshLists(qc),
   });
 }
 

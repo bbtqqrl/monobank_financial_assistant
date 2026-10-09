@@ -3,9 +3,12 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { accountLabel, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
 import { useMonthSpend, useTransactions } from '@/api/transactions';
+import { cardOrder } from '@/lib/cardOrder';
+import { thud } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
 import { monthLabel, whenLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
+import { usePullRefresh } from '@/lib/usePullRefresh';
 import { BalanceCard } from '@/ui/BalanceCard';
 import { BalanceCarousel } from '@/ui/BalanceCarousel';
 import { Header } from '@/ui/Header';
@@ -13,11 +16,17 @@ import { RecentCard } from '@/ui/RecentCard';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 
+const openCards = () => {
+  thud();
+  router.push('/cards');
+};
+
 export default function OverviewScreen() {
   const accounts = useAccounts();
   const spend = useMonthSpend();
   const month = monthLabel();
-  const cards = sortedAccounts(accounts.data ?? []).map((a) => {
+  const order = cardOrder.useValue();
+  const cards = sortedAccounts(accounts.data ?? [], order).map((a) => {
     const spent = spend.data?.get(a.id);
     return {
       key: a.id,
@@ -25,6 +34,7 @@ export default function OverviewScreen() {
       balance: ownBalance(a),
       currency: a.currency_code,
       account: accountLabel(a),
+      cardType: a.account_type,
       spent: spent ? `${formatMoney(spent, a.currency_code, { cents: false })} за ${month}` : undefined,
     };
   });
@@ -33,19 +43,11 @@ export default function OverviewScreen() {
   const currencies = useAccountCurrencies();
   const rows = currencies && recent.data?.map((t) => txRow(t, currencies, whenLabel(t.time)));
 
-  const refresh = () => {
-    accounts.refetch();
-    spend.refetch();
-    recent.refetch();
-  };
+  const pull = usePullRefresh(() => Promise.allSettled([accounts.refetch(), spend.refetch(), recent.refetch()]));
 
   // TODO: background="none" again once the map backdrop is in
   return (
-    <Screen
-      background="warm"
-      refreshing={accounts.isRefetching || spend.isRefetching || recent.isRefetching}
-      onRefresh={refresh}
-    >
+    <Screen background="warm" refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
       <Header
         title="Огляд"
         left={{ icon: 'person', label: 'Профіль', onPress: () => router.push('/profile') }}
@@ -69,7 +71,7 @@ export default function OverviewScreen() {
           <Text tone="faint">Щойно підключиш, тут зʼявиться баланс картки</Text>
         </View>
       ) : cards.length > 0 ? (
-        <BalanceCarousel cards={cards} />
+        <BalanceCarousel cards={cards} onLongPress={openCards} />
       ) : (
         // still loading
         <BalanceCard />

@@ -9,7 +9,8 @@ from app.db.models.user import User
 from app.db.session import SessionLocal, get_db
 from app.schemas.monobank import ConnectMonobankRequest, ConnectMonobankResponse, MonobankRefreshResponse
 from app.services.statement_backfill_service import StatementBackfillService
-from app.services.sync_service import MonobankNotConnectedError, MonobankSyncService
+from app.core.config import MONO_WEBHOOK_URL
+from app.services.sync_service import MonobankNotConnectedError, MonobankSyncService, WebhookRegistrationError
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,27 @@ async def connect_monobank(
             message="Monobank connected successfully",
         )
 
-    except httpx.HTTPStatusError:
-        logger.warning("Monobank rejected token for user_id=%s", current_user.id)
+    except WebhookRegistrationError as e:
+        # Accounts and token are already saved at this point; only live
+        # updates are missing. Calling /connect again retries the webhook.
+        logger.error(
+            "Webhook registration failed for user_id=%s url=%s: HTTP %s %s",
+            current_user.id, MONO_WEBHOOK_URL, e.status_code, e.body,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Monobank refused the webhook URL (HTTP {e.status_code}): {e.body or 'no details'}",
+        )
+
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        if status_code == 429:
+            # client-info is limited to one call per 60s per token
+            raise HTTPException(status_code=429, detail="Monobank rate limit, try again in a minute")
+        logger.warning(
+            "Monobank rejected token for user_id=%s: HTTP %s %s",
+            current_user.id, status_code, e.response.text[:500],
+        )
         raise HTTPException(status_code=400, detail="Invalid or expired Monobank token")
 
     except Exception:
@@ -72,7 +92,7 @@ async def refresh_client_info(
     """Re-sync the user's cards and jars from Monobank using their stored
     token and return them."""
     try:
-        accounts, jars = await MonobankSyncService(db).refresh(current_user)
+        accounts, jars, webhook_url = await MonobankSyncService(db).refresh(current_user)
     except MonobankNotConnectedError:
         raise HTTPException(status_code=400, detail="Monobank is not connected")
     except httpx.HTTPStatusError as e:
@@ -90,4 +110,9 @@ async def refresh_client_info(
     ):
         background_tasks.add_task(run_statement_backfill, current_user.id, current_user.mono_token)
 
-    return MonobankRefreshResponse(accounts=accounts, jars=jars)
+    return MonobankRefreshResponse(
+        accounts=accounts,
+        jars=jars,
+        webhook_url=webhook_url,
+        webhook_registered=webhook_url == MONO_WEBHOOK_URL,
+    )

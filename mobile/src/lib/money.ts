@@ -66,3 +66,20 @@ export function formatMoney(minor: number, currency: number = UAH, opts: MoneyOp
   if (locale === 'en' && cur.symbol.length === 1) return prefix + cur.symbol + number;
   return prefix + number + NBSP + cur.symbol;
 }
+
+export function currencySymbol(currency: number = UAH) {
+  return CURRENCIES[currency]?.symbol ?? '¤';
+}
+
+// What the user typed, "12,5" or "12.50", into minor units, without floats.
+// null unless it's a positive amount with no more decimals than the currency has.
+export function parseAmount(text: string, currency: number = UAH): number | null {
+  const exponent = CURRENCIES[currency]?.exponent ?? 2;
+  // ",5" is half a unit
+  const m = /^(\d{0,9})(?:[.,](\d*))?$/.exec(text.trim());
+  if (!m) return null;
+  const fraction = m[2] ?? '';
+  if (fraction.length > exponent) return null;
+  const minor = Number(m[1] || '0') * 10 ** exponent + Number(fraction.padEnd(exponent, '0') || '0');
+  return minor > 0 ? minor : null;
+}

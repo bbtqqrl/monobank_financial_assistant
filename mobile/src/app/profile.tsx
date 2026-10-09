@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
@@ -29,6 +30,7 @@ export default function ProfileScreen() {
       {/* Figma: 4 16 4 16 */}
       <Glass contentStyle={styles.settings}>
         <SettingRow icon="sun" label="Тема" value={THEME_LABELS[theme]} onPress={() => pickTheme(theme)} />
+        <SettingRow icon="card" label="Картки" value="Порядок" onPress={() => router.push('/cards')} />
       </Glass>
 
       <Pressable

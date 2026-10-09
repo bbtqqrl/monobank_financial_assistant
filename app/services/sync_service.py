@@ -1,3 +1,4 @@
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import MONO_WEBHOOK_URL
@@ -11,6 +12,16 @@ from app.repositories.jar import JarRepository
 
 class MonobankNotConnectedError(Exception):
     """The user has no Monobank token stored."""
+
+
+class WebhookRegistrationError(Exception):
+    """Monobank accepted the token but refused the webhook URL - typically
+    because its validation GET couldn't reach us or didn't get a 200."""
+
+    def __init__(self, status_code: int, body: str):
+        super().__init__(f"Monobank refused webhook registration: HTTP {status_code} {body}")
+        self.status_code = status_code
+        self.body = body
 
 
 class MonobankSyncService:
@@ -40,7 +51,10 @@ class MonobankSyncService:
             # an account we haven't saved yet would be dropped as unknown.
             await self.db.commit()
 
-            await self.api.register_webhook(token, MONO_WEBHOOK_URL)
+            try:
+                await self.api.register_webhook(token, MONO_WEBHOOK_URL)
+            except httpx.HTTPStatusError as e:
+                raise WebhookRegistrationError(e.response.status_code, e.response.text[:500]) from e
             
             return {
                 "status": "ok",
@@ -50,9 +64,10 @@ class MonobankSyncService:
         finally:
             await self.api.close()
 
-    async def refresh(self, user: User) -> tuple[list[MonoAccount], list[MonoJar]]:
+    async def refresh(self, user: User) -> tuple[list[MonoAccount], list[MonoJar], str | None]:
         """Re-pull client-info with the user's stored token and bring their
-        accounts and jars up to date (balances, new or closed cards/jars)."""
+        accounts and jars up to date (balances, new or closed cards/jars).
+        Also returns the webhook URL Monobank currently has for this token."""
         if not user.mono_token:
             raise MonobankNotConnectedError()
 
@@ -65,7 +80,11 @@ class MonobankSyncService:
         await self._sync_jars(user, client_info.get("jars", []))
         await self.db.commit()
 
-        return await self.accounts.list_for_user(user.id), await self.jars.list_for_user(user.id)
+        return (
+            await self.accounts.list_for_user(user.id),
+            await self.jars.list_for_user(user.id),
+            client_info.get("webHookUrl") or None,
+        )
     
     async def _deactivate_previous_accounts(self, user: User) -> None:
         for account in await self.accounts.list_for_user(user.id):
