@@ -12,13 +12,15 @@ type Props = {
   from?: string;
   to?: string;
   onChange: (from: string | undefined, to: string | undefined) => void;
+  // one day instead of a range: every tap moves `from`
+  single?: boolean;
 };
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
 
 // Month grid with a range: first tap sets the start, second the end.
 // Days after today can't be picked.
-export function RangeCalendar({ from, to, onChange }: Props) {
+export function RangeCalendar({ from, to, onChange, single = false }: Props) {
   const { c, dark } = useTheme();
   const today = isoDate(new Date());
   const [month, setMonth] = useState(() => {
@@ -40,7 +42,7 @@ export function RangeCalendar({ from, to, onChange }: Props) {
   const weeks = Array.from({ length: cells.length / 7 }, (_, w) => cells.slice(w * 7, w * 7 + 7));
 
   const pick = (day: string) => {
-    if (!from || to) onChange(day, undefined);
+    if (single || !from || to) onChange(day, undefined);
     else if (day < from) onChange(day, from);
     else onChange(from, day);
   };

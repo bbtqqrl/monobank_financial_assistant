@@ -1,15 +1,22 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { accountLabel, useAccountCurrencies, useAccounts } from '@/api/accounts';
 import { ApiError } from '@/api/client';
-import { foreignPart, txCurrency, useTransaction, type TransactionDetail } from '@/api/transactions';
+import {
+  foreignPart,
+  txCurrency,
+  useDeleteTransaction,
+  useTransaction,
+  type TransactionDetail,
+} from '@/api/transactions';
 import { categoryLook } from '@/lib/categories';
 import { formatMoney } from '@/lib/money';
 import { fullDate } from '@/lib/time';
 import { goBack } from '@/lib/nav';
 import { TEXT, useTheme, withAlpha } from '@/theme';
+import { Button } from '@/ui/Button';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
@@ -19,6 +26,7 @@ import { Text } from '@/ui/Text';
 
 // where the category came from, see category_source in the backend
 function sourceLine(t: TransactionDetail): { icon: IconName; text: string } {
+  if (t.source === 'manual') return { icon: 'pencil', text: 'Додано вручну' };
   const pct = t.category_confidence !== null ? ` · ${Math.round(t.category_confidence * 100)}%` : '';
   switch (t.category_source) {
     case 'user':
@@ -43,16 +51,34 @@ export default function TransactionScreen() {
   const { c } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const tx = useTransaction(Number(id));
+  const remove = useDeleteTransaction(Number(id));
   const accounts = useAccounts();
   const currencies = useAccountCurrencies();
   const t = tx.data;
+
+  // only what was added by hand can go, the bank's own history stays
+  const confirmDelete = () =>
+    Alert.alert('Видалити транзакцію?', 'Її не можна буде повернути', [
+      { text: 'Скасувати', style: 'cancel' },
+      {
+        text: 'Видалити',
+        style: 'destructive',
+        onPress: () =>
+          remove.mutate(undefined, {
+            onSuccess: goBack,
+            onError: () => Alert.alert('Не вдалося видалити', 'Перевір інтернет і спробуй ще раз'),
+          }),
+      },
+    ]);
 
   const header = (
     <Header
       title="Деталі транзакції"
       small
       left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
-      right={{ icon: 'dots', label: 'Ще', weight: 2.4 }}
+      right={
+        t?.source === 'manual' ? { icon: 'dots', label: 'Видалити', weight: 2.4, onPress: confirmDelete } : undefined
+      }
     />
   );
 
@@ -78,10 +104,12 @@ export default function TransactionScreen() {
   const income = t.amount > 0;
   const src = sourceLine(t);
   const account = accounts.data?.find((a) => a.id === t.account_id);
+  const changeCategory = () => router.push({ pathname: '/transaction/[id]/category', params: { id: String(t.id) } });
 
   const info: [string, string][] = [];
   if (account) info.push(['Рахунок', accountLabel(account)]);
   else if (t.jar_id !== null) info.push(['Рахунок', 'Банка']);
+  else if (t.source === 'manual') info.push(['Рахунок', 'Готівка']);
   if (original) info.push(['Сума покупки', formatMoney(original.amount, original.currency, { sign: 'never' })]);
   if (t.counter_name) info.push(['Отримувач', t.counter_name]);
   if (t.comment) info.push(['Коментар', t.comment]);
@@ -106,25 +134,33 @@ export default function TransactionScreen() {
         </Text>
       </View>
 
-      <Glass radius={22} contentStyle={styles.category}>
-        <Text variant="labelCaps" tone="ghost">
-          Категорія
-        </Text>
-        <View style={styles.categoryRow}>
-          <CategoryChip {...look} size={36} radius={12} />
-          <View style={styles.categoryText}>
-            <Text variant="bodyStrong" style={styles.categoryName}>
-              {t.category?.name ?? 'Без категорії'}
-            </Text>
-            <View style={styles.source}>
-              <Icon name={src.icon} size={11} color={c.accent} weight={2.2} />
-              <Text variant="rowCaption" tone="muted" style={styles.sourceText}>
-                {src.text}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Змінити категорію"
+        onPress={changeCategory}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <Glass radius={22} contentStyle={styles.category}>
+          <Text variant="labelCaps" tone="ghost">
+            Категорія
+          </Text>
+          <View style={styles.categoryRow}>
+            <CategoryChip {...look} size={36} radius={12} />
+            <View style={styles.categoryText}>
+              <Text variant="bodyStrong" style={styles.categoryName}>
+                {t.category?.name ?? 'Без категорії'}
               </Text>
+              <View style={styles.source}>
+                <Icon name={src.icon} size={11} color={c.accent} weight={2.2} />
+                <Text variant="rowCaption" tone="muted" style={styles.sourceText}>
+                  {src.text}
+                </Text>
+              </View>
             </View>
+            <Icon name="chevronRight" size={18} color={c.ghost} weight={1.9} />
           </View>
-        </View>
-      </Glass>
+        </Glass>
+      </Pressable>
 
       {info.length > 0 && (
         <Glass radius={22} contentStyle={styles.info}>
@@ -144,6 +180,8 @@ export default function TransactionScreen() {
           ))}
         </Glass>
       )}
+
+      <Button label="Змінити категорію" onPress={changeCategory} />
     </Screen>
   );
 }
@@ -166,4 +204,5 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingVertical: 6 },
   infoValue: { flexShrink: 1, textAlign: 'right' },
   divider: { height: 1 },
+  pressed: { opacity: 0.6 },
 });

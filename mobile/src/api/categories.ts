@@ -19,6 +19,9 @@ export const CategoryBriefSchema = z.object({ id: int, name: z.string(), slug: z
 
 export type CategoryBrief = z.infer<typeof CategoryBriefSchema>;
 
+// a tree node without its children
+export const toBrief = ({ id, name, slug, kind }: CategoryBrief): CategoryBrief => ({ id, name, slug, kind });
+
 // GET /categories: top-level categories with their children, one level deep
 const TreeSchema = z.array(CategoryBriefSchema.extend({ children: z.array(CategoryBriefSchema) }));
 

@@ -54,23 +54,32 @@ export function mainAccount(accounts: Account[]): Account | undefined {
   return uah.find((a) => a.account_type === 'black') ?? uah[0] ?? active[0];
 }
 
-// main account first, then the rest in the bank's order, empty ones at the end
-export function sortedAccounts(accounts: Account[]): Account[] {
+// The user's own order when there is one. Otherwise the main account first,
+// then the rest in the bank's order, empty ones at the end; cards opened since
+// the user arranged them follow in that same order.
+export function sortedAccounts(accounts: Account[], order?: readonly number[] | null): Account[] {
   const main = mainAccount(accounts);
   const rest = accounts.filter((a) => a.is_active && a !== main);
   const filled = rest.filter((a) => ownBalance(a) !== 0);
   const empty = rest.filter((a) => ownBalance(a) === 0);
-  return [...(main ? [main] : []), ...filled, ...empty];
+  const byBank = [...(main ? [main] : []), ...filled, ...empty];
+  if (!order) return byBank;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const at = (a: Account) => rank.get(a.id) ?? order.length;
+  return [...byBank].sort((a, b) => at(a) - at(b));
 }
 
 export function ownBalance(a: Account) {
   return a.balance - a.credit_limit;
 }
 
+export function accountName(a: Account) {
+  return CURRENCY_NAMES[a.currency_code] ?? CARD_NAMES[a.account_type] ?? 'Рахунок';
+}
+
 export function accountLabel(a: Account) {
-  const name = CURRENCY_NAMES[a.currency_code] ?? CARD_NAMES[a.account_type] ?? 'Рахунок';
   const last4 = a.masked_pan?.slice(-4);
-  return last4 ? `${name} · ${last4}` : name;
+  return last4 ? `${accountName(a)} · ${last4}` : accountName(a);
 }
 
 // undefined until accounts load: amounts can't be labelled before that

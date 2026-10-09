@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -18,6 +18,7 @@ export type BalanceCardData = {
   balance: number;
   currency: number;
   account: string;
+  cardType?: string;
   spent?: string;
 };
 
@@ -29,7 +30,7 @@ const SHADOW = 48;
 
 // Swipe between accounts. The row runs edge to edge so cards slide in from
 // the screen edge; dots below follow the finger.
-export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
+export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData[]; onLongPress?: () => void }) {
   const { width } = useWindowDimensions();
   // TODO: remember between launches once settings are stored
   const [hidden, setHidden] = useState(false);
@@ -45,7 +46,7 @@ export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
 
   if (cards.length < 2) {
     const { key: _key, ...card } = cards[0] ?? { key: 0 };
-    return <BalanceCard {...card} hidden={hidden} onToggleHidden={toggle} />;
+    return <BalanceCard {...card} hidden={hidden} onToggleHidden={toggle} onLongPress={onLongPress} />;
   }
 
   return (
@@ -61,8 +62,16 @@ export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
         style={styles.row}
         contentContainerStyle={styles.content}
       >
-        {cards.map(({ key, ...card }) => (
-          <BalanceCard {...card} key={key} hidden={hidden} onToggleHidden={toggle} style={{ width: cardWidth }} />
+        {cards.map(({ key, ...card }, i) => (
+          <Tilt key={key} index={i} progress={progress}>
+            <BalanceCard
+              {...card}
+              hidden={hidden}
+              onToggleHidden={toggle}
+              onLongPress={onLongPress}
+              style={{ width: cardWidth }}
+            />
+          </Tilt>
         ))}
       </Animated.ScrollView>
       <View style={styles.dots}>
@@ -72,6 +81,22 @@ export function BalanceCarousel({ cards }: { cards: BalanceCardData[] }) {
       </View>
     </View>
   );
+}
+
+// Cards leaving or coming in turn a little and step back, like a deck
+function Tilt({ index, progress, children }: { index: number; progress: SharedValue<number>; children: ReactNode }) {
+  const style = useAnimatedStyle(() => {
+    const d = progress.value - index;
+    const away = Math.min(Math.abs(d), 1);
+    return {
+      transform: [
+        { perspective: 900 },
+        { rotateY: `${interpolate(d, [-1, 0, 1], [-14, 0, 14], Extrapolation.CLAMP)}deg` },
+        { scale: 1 - 0.07 * away },
+      ],
+    };
+  });
+  return <Animated.View style={style}>{children}</Animated.View>;
 }
 
 function Dot({ index, progress }: { index: number; progress: SharedValue<number> }) {
