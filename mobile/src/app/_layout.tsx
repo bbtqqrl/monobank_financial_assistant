@@ -9,7 +9,7 @@ import { useSession } from '@/api/auth';
 import { queryClient } from '@/api/query';
 import { loadTokens } from '@/api/tokens';
 import { FONT_FILES } from '@/lib/fonts';
-import { useTheme } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { loadThemePref } from '@/theme/preference';
 
 // keep the splash until fonts, the theme choice and the saved session are ready
@@ -47,7 +47,18 @@ export default function RootLayout() {
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="profile" />
-          <Stack.Screen name="transaction/[id]" />
+          <Stack.Screen name="transaction/[id]/index" />
+          <Stack.Screen
+            name="transaction/[id]/category"
+            options={{
+              presentation: 'formSheet',
+              sheetAllowedDetents: [0.75, 1],
+              sheetGrabberVisible: true,
+              sheetCornerRadius: 28,
+              // the dark button under it would smear through clear glass
+              contentStyle: { backgroundColor: withAlpha(c.sheet, 0.86) },
+            }}
+          />
         </Stack.Protected>
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="login" />

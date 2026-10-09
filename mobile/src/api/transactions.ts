@@ -1,11 +1,18 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { z } from 'zod';
 
 import { UAH } from '@/lib/money';
 import { isoDate, parseIso, type MonthKey } from '@/lib/period';
 
-import { CategoryBriefSchema } from './categories';
+import { CategoryBriefSchema, type CategoryBrief } from './categories';
 import { api } from './client';
 
 const int = z.number().int();
@@ -133,6 +140,41 @@ export function useTransaction(id: number) {
     queryFn: () => api(TransactionDetailSchema, `/transactions/${id}`),
     placeholderData: () => fromLists(qc, id),
     enabled: Number.isInteger(id),
+  });
+}
+
+// lists and sums that a category change can move a transaction in or out of
+const AFFECTED = new Set(['transactions', 'tx-all', 'month-spend', 'tx-active-months', 'tx-oldest']);
+
+// PATCH /transactions/{id}/category. The backend also remembers the choice for
+// the merchant (when there's an MCC), so later purchases there follow it.
+export function useSetCategory(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (category: CategoryBrief) =>
+      api(TransactionDetailSchema, `/transactions/${id}/category`, {
+        method: 'PATCH',
+        body: { category_id: category.id },
+      }),
+    // the details screen under the sheet changes right away
+    onMutate: async (category) => {
+      await qc.cancelQueries({ queryKey: ['transaction', id] });
+      const before = qc.getQueryData<TransactionDetail>(['transaction', id]);
+      if (before) {
+        qc.setQueryData<TransactionDetail>(['transaction', id], {
+          ...before,
+          category,
+          category_source: 'user',
+          category_confidence: null,
+        });
+      }
+      return { before };
+    },
+    onError: (_error, _category, context) => {
+      if (context?.before) qc.setQueryData(['transaction', id], context.before);
+    },
+    onSuccess: (detail) => qc.setQueryData(['transaction', id], detail),
+    onSettled: () => qc.invalidateQueries({ predicate: (q) => AFFECTED.has(String(q.queryKey[0])) }),
   });
 }
 

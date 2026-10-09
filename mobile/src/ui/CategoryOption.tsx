@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { CategoryLook } from '@/lib/categories';
 import { FONT } from '@/lib/fonts';
@@ -13,6 +13,8 @@ type Props = {
   // the parent's name in search results
   caption?: string;
   selected: boolean;
+  // being saved: a spinner in place of the radio
+  busy?: boolean;
   onPress: () => void;
   // a parent with children gets a chevron to show them
   expanded?: boolean;
@@ -22,13 +24,23 @@ type Props = {
 };
 
 // A row of the category list: chip · name · radio (Figma: ChangeCategory)
-export function CategoryOption({ look, name, caption, selected, onPress, expanded, onToggle, nested = false }: Props) {
+export function CategoryOption({
+  look,
+  name,
+  caption,
+  selected,
+  busy = false,
+  onPress,
+  expanded,
+  onToggle,
+  nested = false,
+}: Props) {
   const { c } = useTheme();
 
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
+      accessibilityState={{ checked: selected, busy }}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
@@ -59,14 +71,18 @@ export function CategoryOption({ look, name, caption, selected, onPress, expande
           <Icon name="chevronDown" size={16} color={c.ghost} weight={2} />
         </Pressable>
       ) : null}
-      <View
-        style={[
-          styles.radio,
-          selected ? { backgroundColor: c.accent, borderColor: c.accent } : { borderColor: withAlpha(c.shade, 0.2) },
-        ]}
-      >
-        {selected ? <Icon name="check" size={12} color={c.onPrimary} weight={3} /> : null}
-      </View>
+      {busy ? (
+        <ActivityIndicator style={styles.spinner} color={c.accent} />
+      ) : (
+        <View
+          style={[
+            styles.radio,
+            selected ? { backgroundColor: c.accent, borderColor: c.accent } : { borderColor: withAlpha(c.shade, 0.2) },
+          ]}
+        >
+          {selected ? <Icon name="check" size={12} color={c.onPrimary} weight={3} /> : null}
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -90,5 +106,6 @@ const styles = StyleSheet.create({
   nameOn: { fontFamily: FONT.ui.semiBold },
   toggle: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   toggleOpen: { transform: [{ rotate: '180deg' }] },
+  spinner: { width: 21, height: 21 },
   radio: { width: 21, height: 21, borderRadius: 11, borderWidth: 1.6, alignItems: 'center', justifyContent: 'center' },
 });

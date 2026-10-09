@@ -1,6 +1,6 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { accountLabel, useAccountCurrencies, useAccounts } from '@/api/accounts';
 import { ApiError } from '@/api/client';
@@ -10,6 +10,7 @@ import { formatMoney } from '@/lib/money';
 import { fullDate } from '@/lib/time';
 import { goBack } from '@/lib/nav';
 import { TEXT, useTheme, withAlpha } from '@/theme';
+import { Button } from '@/ui/Button';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
@@ -78,6 +79,7 @@ export default function TransactionScreen() {
   const income = t.amount > 0;
   const src = sourceLine(t);
   const account = accounts.data?.find((a) => a.id === t.account_id);
+  const changeCategory = () => router.push({ pathname: '/transaction/[id]/category', params: { id: String(t.id) } });
 
   const info: [string, string][] = [];
   if (account) info.push(['Рахунок', accountLabel(account)]);
@@ -106,25 +108,33 @@ export default function TransactionScreen() {
         </Text>
       </View>
 
-      <Glass radius={22} contentStyle={styles.category}>
-        <Text variant="labelCaps" tone="ghost">
-          Категорія
-        </Text>
-        <View style={styles.categoryRow}>
-          <CategoryChip {...look} size={36} radius={12} />
-          <View style={styles.categoryText}>
-            <Text variant="bodyStrong" style={styles.categoryName}>
-              {t.category?.name ?? 'Без категорії'}
-            </Text>
-            <View style={styles.source}>
-              <Icon name={src.icon} size={11} color={c.accent} weight={2.2} />
-              <Text variant="rowCaption" tone="muted" style={styles.sourceText}>
-                {src.text}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Змінити категорію"
+        onPress={changeCategory}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <Glass radius={22} contentStyle={styles.category}>
+          <Text variant="labelCaps" tone="ghost">
+            Категорія
+          </Text>
+          <View style={styles.categoryRow}>
+            <CategoryChip {...look} size={36} radius={12} />
+            <View style={styles.categoryText}>
+              <Text variant="bodyStrong" style={styles.categoryName}>
+                {t.category?.name ?? 'Без категорії'}
               </Text>
+              <View style={styles.source}>
+                <Icon name={src.icon} size={11} color={c.accent} weight={2.2} />
+                <Text variant="rowCaption" tone="muted" style={styles.sourceText}>
+                  {src.text}
+                </Text>
+              </View>
             </View>
+            <Icon name="chevronRight" size={18} color={c.ghost} weight={1.9} />
           </View>
-        </View>
-      </Glass>
+        </Glass>
+      </Pressable>
 
       {info.length > 0 && (
         <Glass radius={22} contentStyle={styles.info}>
@@ -144,6 +154,8 @@ export default function TransactionScreen() {
           ))}
         </Glass>
       )}
+
+      <Button label="Змінити категорію" onPress={changeCategory} />
     </Screen>
   );
 }
@@ -166,4 +178,5 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingVertical: 6 },
   infoValue: { flexShrink: 1, textAlign: 'right' },
   divider: { height: 1 },
+  pressed: { opacity: 0.6 },
 });
