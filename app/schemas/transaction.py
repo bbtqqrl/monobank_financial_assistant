@@ -50,7 +50,10 @@ class UpdateTransactionCategoryRequest(BaseModel):
 class CreateTransactionRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
     amount: int = Field(description="In minor units (kopecks). Negative = expense, positive = income.")
-    currency_code: int = 980
+    currency_code: int | None = Field(
+        default=None,
+        description="ISO 4217 numeric. Taken from the account or jar when one is given; defaults to 980 (UAH) otherwise.",
+    )
     # Required: a manual transaction is never seen by the AI or the sweeper,
     # so without a category here it would stay uncategorized forever.
     category_id: int
