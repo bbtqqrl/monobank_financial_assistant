@@ -16,6 +16,7 @@ class TransactionListItem(BaseModel):
     time: int
     description: str
     amount: int
+    account_currency_code: int
     operation_amount: int | None
     currency_code: int
     mcc: int | None

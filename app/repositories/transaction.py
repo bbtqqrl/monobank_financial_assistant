@@ -6,8 +6,24 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
+from app.db.models.mono_accounts import MonoAccount
+from app.db.models.mono_jars import MonoJar
 from app.db.models.transaction import TransactionRaw
 from app.schemas.monobank import MonoTransactionSchema
+
+
+ACCOUNT_CURRENCY = func.coalesce(
+    MonoAccount.currency_code, MonoJar.currency_code, TransactionRaw.currency_code,
+).label("account_currency_code")
+
+
+def _with_category_and_currency():
+    return (
+        select(TransactionRaw, Category, ACCOUNT_CURRENCY)
+        .join(Category, Category.id == TransactionRaw.category_id, isouter=True)
+        .join(MonoAccount, MonoAccount.id == TransactionRaw.account_id, isouter=True)
+        .join(MonoJar, MonoJar.id == TransactionRaw.jar_id, isouter=True)
+    )
 
 
 class TransactionRepository:
@@ -34,10 +50,9 @@ class TransactionRepository:
 
     async def get_detail_for_user(
         self, transaction_id: int, user_id: int
-    ) -> Optional[tuple[TransactionRaw, Optional[Category]]]:
+    ) -> Optional[tuple[TransactionRaw, Optional[Category], int]]:
         result = await self.db.execute(
-            select(TransactionRaw, Category)
-            .join(Category, Category.id == TransactionRaw.category_id, isouter=True)
+            _with_category_and_currency()
             .where(TransactionRaw.id == transaction_id, TransactionRaw.user_id == user_id)
         )
 
@@ -55,7 +70,7 @@ class TransactionRepository:
         search: str | None = None,
         page: int = 1,
         limit: int = 30,
-    ) -> tuple[list[tuple[TransactionRaw, Optional[Category]]], int]:
+    ) -> tuple[list[tuple[TransactionRaw, Optional[Category], int]], int]:
         conditions = [TransactionRaw.user_id == user_id]
 
         if account_id is not None:
@@ -75,11 +90,7 @@ class TransactionRepository:
         if category_id is not None:
             conditions.append(TransactionRaw.category_id == category_id)
 
-        base = (
-            select(TransactionRaw, Category)
-            .join(Category, Category.id == TransactionRaw.category_id, isouter=True)
-            .where(*conditions)
-        )
+        base = _with_category_and_currency().where(*conditions)
 
         count_result = await self.db.execute(
             select(func.count()).select_from(base.with_only_columns(TransactionRaw.id).subquery())
