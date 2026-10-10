@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,6 +113,7 @@ class TransactionRepository:
                 TransactionRaw.amount == -operation_amount,
                 func.coalesce(TransactionRaw.operation_amount, TransactionRaw.amount) == -amount,
                 TransactionRaw.transfer_pair_id.is_(None),
+                or_(TransactionRaw.account_id.is_not(None), TransactionRaw.jar_id.is_not(None)),
                 TransactionRaw.time.between(time - window_seconds, time + window_seconds),
                 ~and_(
                     TransactionRaw.account_id.is_not_distinct_from(account_id),
