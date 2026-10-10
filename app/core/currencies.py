@@ -40,3 +40,11 @@ ISO_ALPHA = {
 
 def alpha_code(numeric: int) -> str:
     return ISO_ALPHA.get(numeric, str(numeric))
+
+
+def known_amount_uah(amount: int, operation_amount: int | None, currency: int, operation_currency: int) -> int | None:
+    if currency == UAH:
+        return amount
+    if operation_currency == UAH and operation_amount is not None:
+        return operation_amount
+    return None
