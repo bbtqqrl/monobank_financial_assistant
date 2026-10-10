@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.currencies import UAH
 from app.db.models.user import User
 from app.db.session import get_db
 from app.repositories.account import AccountRepository
@@ -37,13 +38,14 @@ def _category_brief(category) -> CategoryBrief | None:
     return CategoryBrief.model_validate(category) if category is not None else None
 
 
-def _to_list_item(transaction, category) -> TransactionListItem:
+def _to_list_item(transaction, category, account_currency_code: int) -> TransactionListItem:
     return TransactionListItem(
         id=transaction.id,
         source=transaction.source,
         time=transaction.time,
         description=transaction.description,
         amount=transaction.amount,
+        account_currency_code=account_currency_code,
         operation_amount=transaction.operation_amount,
         currency_code=transaction.currency_code,
         mcc=transaction.mcc,
@@ -88,7 +90,7 @@ async def list_transactions(
     )
 
     return TransactionListResponse(
-        items=[_to_list_item(t, c) for t, c in rows],
+        items=[_to_list_item(t, c, ccy) for t, c, ccy in rows],
         page=page,
         limit=limit,
         total=total,
@@ -107,15 +109,26 @@ async def create_transaction(
             detail="A transaction can belong to an account or a jar, not both",
         )
 
+    holder_currency = None
+
     if data.account_id is not None:
         account = await AccountRepository(db).get_by_id_for_user(data.account_id, current_user.id)
         if account is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        holder_currency = account.currency_code
 
     if data.jar_id is not None:
         jar = await JarRepository(db).get_by_id_for_user(data.jar_id, current_user.id)
         if jar is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jar not found")
+        holder_currency = jar.currency_code
+
+    if holder_currency is not None and data.currency_code not in (None, holder_currency):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"currency_code must match the account's currency ({holder_currency})",
+        )
+    currency_code = holder_currency or data.currency_code or UAH
 
     category = await CategoryRepository(db).get_selectable_by_id(data.category_id)
     if category is None:
@@ -132,7 +145,7 @@ async def create_transaction(
         jar_id=data.jar_id,
         description=data.description,
         amount=data.amount,
-        currency_code=data.currency_code,
+        currency_code=currency_code,
         time=data.time if data.time is not None else int(datetime.now(timezone.utc).timestamp()),
         comment=data.comment,
         category_id=category.id,
@@ -140,10 +153,10 @@ async def create_transaction(
     await db.commit()
 
     row = await transactions.get_detail_for_user(transaction.id, current_user.id)
-    transaction, category = row
+    transaction, category, account_currency_code = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category).model_dump(),
+        **_to_list_item(transaction, category, account_currency_code).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,
@@ -164,10 +177,10 @@ async def get_transaction(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
-    transaction, category = row
+    transaction, category, account_currency_code = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category).model_dump(),
+        **_to_list_item(transaction, category, account_currency_code).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,
@@ -210,10 +223,10 @@ async def update_manual_transaction(
 
     transactions = TransactionRepository(db)
     row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category = row
+    transaction, category, account_currency_code = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category).model_dump(),
+        **_to_list_item(transaction, category, account_currency_code).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,
@@ -267,10 +280,10 @@ async def update_transaction_category(
 
     transactions = TransactionRepository(db)
     row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category = row
+    transaction, category, account_currency_code = row
 
     return TransactionDetail(
-        **_to_list_item(transaction, category).model_dump(),
+        **_to_list_item(transaction, category, account_currency_code).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,

@@ -22,6 +22,10 @@ CONFIDENCE_THRESHOLD = 0.7
 # a refund (incoming, expense kind), a transfer or unknown.
 OUTGOING_KINDS = ("expense", "transfer", "unknown")
 
+PAIR_JAR_SLUG = "zaoshchadzhennia"
+PAIR_EXCHANGE_SLUG = "obmin-valiut"
+PAIR_OWN_ACCOUNTS_SLUG = "mizh-svoimy-rakhunkamy"
+
 
 class CategorizationAIError(Exception):
     """Raised when the AI client itself fails (network/API error), as opposed
@@ -81,9 +85,10 @@ class CategorizationService:
             logger.info("Categorization skipped: transaction id=%s already categorized", transaction_id)
             return
 
-        # Linked first: the pair is a strong hint that this is the user's own
-        # money moving, and it's useful data on its own.
         await self._try_link_transfer_pair(transaction)
+
+        if transaction.transfer_pair_id is not None and await self._categorize_pair(transaction):
+            return
 
         merchant_key = build_merchant_key(transaction.description)
 
@@ -126,6 +131,11 @@ class CategorizationService:
                 mcc=transaction.mcc,
                 mcc_name=await self._get_mcc_name(transaction.mcc),
                 amount=transaction.amount,
+                currency=await self._holder_currency(transaction),
+                operation_amount=(
+                    transaction.operation_amount if transaction.operation_amount is not None else transaction.amount
+                ),
+                operation_currency=transaction.currency_code,
                 counter_name=transaction.counter_name,
                 hints=await self._build_hints(transaction),
                 candidates=candidates,
@@ -184,12 +194,6 @@ class CategorizationService:
             if account is not None and account.account_type == "fop":
                 hints.append("This is the user's FOP (sole proprietor) business account.")
 
-        if transaction.transfer_pair_id is not None:
-            hints.append(
-                "An opposite transaction for the same amount happened at the same time "
-                "on another of the user's own accounts or jars."
-            )
-
         if transaction.counter_iban:
             own_ibans = {a.iban for a in await self.accounts.list_for_user(transaction.user_id) if a.iban}
             if transaction.counter_iban in own_ibans:
@@ -203,13 +207,56 @@ class CategorizationService:
         result = await self.db.execute(select(MccCode.name).where(MccCode.code == mcc))
         return result.scalar_one_or_none()
 
+    async def _categorize_pair(self, transaction) -> bool:
+        other = await self.transactions.get_by_id(transaction.transfer_pair_id)
+        if other is None:
+            return False
+
+        slug = await self._pair_category_slug(transaction, other)
+        category = await self.categories.get_by_slug(slug)
+        if category is None:
+            logger.error("Pair category slug=%s is missing, transaction id=%s goes to AI", slug, transaction.id)
+            return False
+
+        self.transactions.set_category(transaction, category_id=category.id, source="pair")
+        if other.category_source != "user":
+            self.transactions.set_category(other, category_id=category.id, source="pair")
+
+        await self.db.commit()
+        logger.info(
+            "Transfer pair categorized id=%s <-> id=%s category=%s",
+            transaction.id, other.id, category.slug,
+        )
+        return True
+
+    async def _pair_category_slug(self, transaction, other) -> str:
+        if transaction.jar_id is not None or other.jar_id is not None:
+            return PAIR_JAR_SLUG
+        if await self._holder_currency(transaction) != await self._holder_currency(other):
+            return PAIR_EXCHANGE_SLUG
+        return PAIR_OWN_ACCOUNTS_SLUG
+
+    async def _holder_currency(self, transaction) -> int:
+        if transaction.account_id is not None:
+            account = await self.accounts.get_by_id_for_user(transaction.account_id, transaction.user_id)
+            if account is not None:
+                return account.currency_code
+        if transaction.jar_id is not None:
+            jar = await self.jars.get_by_id_for_user(transaction.jar_id, transaction.user_id)
+            if jar is not None:
+                return jar.currency_code
+        return transaction.currency_code
+
     async def _try_link_transfer_pair(self, transaction) -> None:
         if transaction.transfer_pair_id is not None:
+            return
+        if transaction.account_id is None and transaction.jar_id is None:
             return
 
         candidate = await self.transactions.find_unpaired_transfer_candidate(
             user_id=transaction.user_id,
-            amount=-transaction.amount,
+            amount=transaction.amount,
+            operation_amount=transaction.operation_amount if transaction.operation_amount is not None else transaction.amount,
             time=transaction.time,
             exclude_id=transaction.id,
             account_id=transaction.account_id,

@@ -46,6 +46,7 @@ class MonobankWebhookService:
         if account:
             account_id = account.id
             user_id = account.user_id
+            currency = account.currency_code
         else:
             jar = await self.jars.get_by_mono_id(mono_id)
 
@@ -55,11 +56,13 @@ class MonobankWebhookService:
 
             jar_id = jar.id
             user_id = jar.user_id
+            currency = jar.currency_code
 
         created_id = await self.transactions.insert_from_mono(
             user_id=user_id,
             account_id=account_id,
             jar_id=jar_id,
+            currency=currency,
             transaction=transaction,
         )
         await self.db.commit()

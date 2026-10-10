@@ -57,7 +57,7 @@ class StatementBackfillService:
             for account in accounts:
                 created_ids = await self._fetch_and_store(
                     user_id, token, account.mono_account_id, from_ts, to_ts,
-                    account_id=account.id, jar_id=None,
+                    account_id=account.id, jar_id=None, currency=account.currency_code,
                 )
                 if created_ids is not None:
                     self.accounts.mark_backfilled(account, datetime.now(timezone.utc))
@@ -67,7 +67,7 @@ class StatementBackfillService:
             for jar in jars:
                 created_ids = await self._fetch_and_store(
                     user_id, token, jar.mono_jar_id, from_ts, to_ts,
-                    account_id=None, jar_id=jar.id,
+                    account_id=None, jar_id=jar.id, currency=jar.currency_code,
                 )
                 if created_ids is not None:
                     self.jars.mark_backfilled(jar, datetime.now(timezone.utc))
@@ -99,6 +99,7 @@ class StatementBackfillService:
         to_ts: int,
         account_id: int | None,
         jar_id: int | None,
+        currency: int,
     ) -> list[int] | None:
         """Returns ids of newly stored transactions, or None if any page
         failed to download (the account then stays pending and is retried on
@@ -119,7 +120,8 @@ class StatementBackfillService:
             for raw in items:
                 transaction = MonoTransactionSchema.model_validate(raw)
                 created_id = await self.transactions.insert_from_mono(
-                    user_id=user_id, account_id=account_id, jar_id=jar_id, transaction=transaction,
+                    user_id=user_id, account_id=account_id, jar_id=jar_id, currency=currency,
+                    transaction=transaction,
                 )
                 if created_id is not None:
                     created_ids.append(created_id)

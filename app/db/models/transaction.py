@@ -69,6 +69,7 @@ class TransactionRaw(Base):
     hold: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     amount: Mapped[int] = mapped_column(BigInteger)
     operation_amount: Mapped[int | None] = mapped_column(BigInteger,nullable=True,)
+    amount_uah: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     currency_code: Mapped[int] = mapped_column(Integer)
     commission_rate: Mapped[int | None] = mapped_column(BigInteger,nullable=True,)
     cashback_amount: Mapped[int | None] = mapped_column(BigInteger,nullable=True,)

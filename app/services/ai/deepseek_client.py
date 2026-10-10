@@ -22,11 +22,24 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
         mcc: int | None,
         mcc_name: str | None,
         amount: int,
+        currency: int,
+        operation_amount: int,
+        operation_currency: int,
         counter_name: str | None,
         hints: list[str],
         candidates: list[CategorizationCandidate],
     ) -> CategorizationResult:
-        user_prompt = build_user_prompt(description, mcc_name, amount, counter_name, hints, candidates)
+        user_prompt = build_user_prompt(
+            description=description,
+            mcc_name=mcc_name,
+            amount=amount,
+            currency=currency,
+            operation_amount=operation_amount,
+            operation_currency=operation_currency,
+            counter_name=counter_name,
+            hints=hints,
+            candidates=candidates,
+        )
 
         response = await self._client.chat.completions.create(
             model=DEEPSEEK_MODEL,

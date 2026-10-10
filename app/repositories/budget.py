@@ -65,10 +65,11 @@ class BudgetRepository:
             return {}
 
         result = await self.db.execute(
-            select(TransactionRaw.category_id, func.sum(-TransactionRaw.amount))
+            select(TransactionRaw.category_id, func.sum(-TransactionRaw.amount_uah))
             .where(
                 TransactionRaw.user_id == user_id,
                 TransactionRaw.category_id.in_(category_ids),
+                TransactionRaw.amount_uah.is_not(None),
                 TransactionRaw.time >= from_ts,
                 TransactionRaw.time < to_ts,
             )
