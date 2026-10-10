@@ -1,7 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { accountLabel, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
+import { refreshAccounts } from '@/api/monobank';
 import { useMonthSpend, useTransactions } from '@/api/transactions';
 import { cardOrder } from '@/lib/cardOrder';
 import { thud } from '@/lib/haptics';
@@ -22,6 +24,7 @@ const openCards = () => {
 };
 
 export default function OverviewScreen() {
+  const qc = useQueryClient();
   const accounts = useAccounts();
   const spend = useMonthSpend();
   const month = monthLabel();
@@ -43,7 +46,7 @@ export default function OverviewScreen() {
   const currencies = useAccountCurrencies();
   const rows = currencies && recent.data?.map((t) => txRow(t, currencies, whenLabel(t.time)));
 
-  const pull = usePullRefresh(() => Promise.allSettled([accounts.refetch(), spend.refetch(), recent.refetch()]));
+  const pull = usePullRefresh(() => Promise.allSettled([refreshAccounts(qc), spend.refetch(), recent.refetch()]));
 
   // TODO: background="none" again once the map backdrop is in
   return (
