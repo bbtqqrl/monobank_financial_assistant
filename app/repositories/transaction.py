@@ -5,6 +5,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.currencies import known_amount_uah
 from app.db.models.categories import Category
 from app.db.models.mono_accounts import MonoAccount
 from app.db.models.mono_jars import MonoJar
@@ -148,6 +149,9 @@ class TransactionRepository:
         if amount is not None:
             transaction.amount = amount
             transaction.operation_amount = amount
+            transaction.amount_uah = known_amount_uah(
+                amount, amount, transaction.currency_code, transaction.currency_code,
+            )
         if comment is not None:
             transaction.comment = comment
         if time is not None:
@@ -190,6 +194,14 @@ class TransactionRepository:
             or existing.mcc != transaction.mcc
         )
 
+        if existing.amount != transaction.amount or existing.operation_amount != transaction.operationAmount:
+            existing.amount_uah = known_amount_uah(
+                transaction.amount,
+                transaction.operationAmount,
+                await self.account_currency(existing.id),
+                transaction.currencyCode,
+            )
+
         existing.hold = transaction.hold
         existing.amount = transaction.amount
         existing.operation_amount = transaction.operationAmount
@@ -208,7 +220,12 @@ class TransactionRepository:
         return changed
 
     async def insert_from_mono(
-        self, user_id: int, account_id: int | None, jar_id: int | None, transaction: MonoTransactionSchema,
+        self,
+        user_id: int,
+        account_id: int | None,
+        jar_id: int | None,
+        currency: int,
+        transaction: MonoTransactionSchema,
     ) -> int | None:
         """Insert a Monobank transaction unless one with the same Monobank id
         already exists. Returns the new row's id, or None if it was already
@@ -240,11 +257,35 @@ class TransactionRepository:
                 counter_iban=transaction.counterIban,
                 counter_name=transaction.counterName,
                 raw_json=transaction.model_dump(),
+                amount_uah=known_amount_uah(
+                    transaction.amount, transaction.operationAmount, currency, transaction.currencyCode,
+                ),
             )
             .on_conflict_do_nothing(index_elements=[TransactionRaw.mono_transaction_id])
             .returning(TransactionRaw.id)
         )
         return result.scalar_one_or_none()
+
+    async def account_currency(self, transaction_id: int) -> int:
+        result = await self.db.execute(
+            select(ACCOUNT_CURRENCY)
+            .select_from(TransactionRaw)
+            .join(MonoAccount, MonoAccount.id == TransactionRaw.account_id, isouter=True)
+            .join(MonoJar, MonoJar.id == TransactionRaw.jar_id, isouter=True)
+            .where(TransactionRaw.id == transaction_id)
+        )
+        return result.scalar_one()
+
+    async def list_missing_amount_uah(self, limit: int) -> list[tuple[TransactionRaw, int]]:
+        result = await self.db.execute(
+            select(TransactionRaw, ACCOUNT_CURRENCY)
+            .join(MonoAccount, MonoAccount.id == TransactionRaw.account_id, isouter=True)
+            .join(MonoJar, MonoJar.id == TransactionRaw.jar_id, isouter=True)
+            .where(TransactionRaw.amount_uah.is_(None))
+            .order_by(TransactionRaw.id)
+            .limit(limit)
+        )
+        return list(result.all())
 
     async def get_for_categorization(self, transaction_id: int) -> Optional[TransactionRaw]:
         """Lock the row for the rest of the DB transaction. Returns None if it
@@ -293,6 +334,7 @@ class TransactionRepository:
             description=description,
             amount=amount,
             operation_amount=amount,
+            amount_uah=known_amount_uah(amount, amount, currency_code, currency_code),
             currency_code=currency_code,
             comment=comment,
             raw_json=None,

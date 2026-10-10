@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.repositories.transaction import TransactionRepository
 from app.services.ai.factory import get_categorization_ai_client
 from app.services.categorization_service import CategorizationAIError, CategorizationService
+from app.services.exchange_rates import amount_uah
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,28 @@ async def sweep_uncategorized() -> None:
     await asyncio.gather(*(_one(tid) for tid in transaction_ids))
 
 
+async def fill_missing_amount_uah() -> None:
+    async with SessionLocal() as db:
+        rows = await TransactionRepository(db).list_missing_amount_uah(limit=SWEEP_BATCH_SIZE)
+        filled = 0
+        for transaction, currency in rows:
+            value = await amount_uah(
+                transaction.amount, transaction.operation_amount, currency, transaction.currency_code, transaction.time,
+            )
+            if value is not None:
+                transaction.amount_uah = value
+                filled += 1
+        await db.commit()
+    if rows:
+        logger.info("Sweeper: filled amount_uah for %s of %s transaction(s)", filled, len(rows))
+
+
 async def run_sweeper_forever() -> None:
     while True:
+        try:
+            await fill_missing_amount_uah()
+        except Exception:
+            logger.exception("amount_uah sweep failed")
         try:
             await sweep_uncategorized()
         except Exception:
