@@ -21,7 +21,6 @@ export default function DraftCategorySheet() {
         draftCategory.set(category);
         close();
       }}
-      onClose={close}
     />
   );
 }

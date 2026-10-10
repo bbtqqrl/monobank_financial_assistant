@@ -1,4 +1,5 @@
-import { txCurrency, type Transaction } from '@/api/transactions';
+import type { Transaction } from '@/api/transactions';
+import { periodFlow } from '@/lib/flow';
 import { formatMoney, UAH } from '@/lib/money';
 import { dayKey, dayLabel } from '@/lib/time';
 
@@ -20,13 +21,10 @@ export function byDay(items: Transaction[]): Day[] {
   return days;
 }
 
-// a sum only makes sense in one currency, so it takes the hryvnia part
-export function uahSum(items: Transaction[], currencies: Map<number, number>) {
-  return items.filter((t) => txCurrency(t, currencies) === UAH).reduce((acc, t) => acc + t.amount, 0);
-}
-
-// hidden when zero, e.g. a transfer out and back on the same day
+// Money in minus money out, counted like the month summary: the user's own
+// money moving between cards, jars and cash is left out. Hidden when zero.
 export function dayTotal(items: Transaction[], currencies: Map<number, number>) {
-  const sum = uahSum(items, currencies);
-  return sum === 0 ? undefined : formatMoney(sum, UAH, { cents: false });
+  const { spent, income } = periodFlow(items, currencies);
+  const sum = income + spent;
+  return sum === 0 ? undefined : formatMoney(sum, UAH, { cents: false, sign: 'always' });
 }

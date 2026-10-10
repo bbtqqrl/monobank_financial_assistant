@@ -87,7 +87,8 @@ export function MonthCard({ title, aside, onPress, onPrev, onNext, flow, days, n
         </Text>
       ) : (
         <View style={[styles.stats, { borderTopColor: withAlpha(c.shade, 0.07) }]}>
-          <Stat icon="arrowDown" label="Витрати" tint={c.category.copper} value={flow && flow.spent} />
+          {/* the label and arrow already say it's going out, so no minus, as on the balance card */}
+          <Stat icon="arrowDown" label="Витрати" tint={c.category.copper} value={flow && -flow.spent} />
           <View style={[styles.statSplit, { backgroundColor: withAlpha(c.shade, 0.07) }]} />
           <Stat icon="arrowUp" label="Надходження" tint={c.category.green} value={flow && flow.income} income />
         </View>

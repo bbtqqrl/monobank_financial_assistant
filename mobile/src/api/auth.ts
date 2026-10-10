@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
+import { z } from 'zod';
 
 import { api, request, saveTokens, TokenResponse } from './client';
 import { queryClient } from './query';
@@ -15,6 +17,18 @@ export function useSession(): Session {
   const tokens = useSyncExternalStore(subscribeTokens, getTokens);
   if (tokens === undefined) return 'loading';
   return tokens ? 'signedIn' : 'signedOut';
+}
+
+// GET /auth/me, the backend's UserResponse
+const MeSchema = z.object({
+  id: z.number().int(),
+  email: z.string(),
+  // set once a monobank token is connected
+  mono_client_id: z.string().nullable(),
+});
+
+export function useMe() {
+  return useQuery({ queryKey: ['me'], queryFn: () => api(MeSchema, '/auth/me'), staleTime: 5 * 60_000 });
 }
 
 export async function signIn(email: string, password: string) {

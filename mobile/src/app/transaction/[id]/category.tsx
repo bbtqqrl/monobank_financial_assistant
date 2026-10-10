@@ -58,7 +58,6 @@ export default function ChangeCategorySheet() {
             ),
         });
       }}
-      onClose={close}
     />
   );
 }

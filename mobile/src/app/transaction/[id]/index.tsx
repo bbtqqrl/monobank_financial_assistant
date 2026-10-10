@@ -16,7 +16,6 @@ import { formatMoney } from '@/lib/money';
 import { fullDate } from '@/lib/time';
 import { goBack } from '@/lib/nav';
 import { TEXT, useTheme, withAlpha } from '@/theme';
-import { Button } from '@/ui/Button';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
@@ -180,8 +179,6 @@ export default function TransactionScreen() {
           ))}
         </Glass>
       )}
-
-      <Button label="Змінити категорію" onPress={changeCategory} />
     </Screen>
   );
 }

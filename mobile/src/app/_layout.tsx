@@ -10,7 +10,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSession } from '@/api/auth';
 import { queryClient } from '@/api/query';
 import { loadTokens } from '@/api/tokens';
-import { loadCardOrder } from '@/lib/cardOrder';
+import { loadCardPrefs } from '@/lib/cardOrder';
 import { FONT_FILES } from '@/lib/fonts';
 import { useTheme, withAlpha } from '@/theme';
 import { loadThemePref } from '@/theme/preference';
@@ -27,7 +27,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     loadTokens();
-    Promise.all([loadThemePref(), loadCardOrder()]).finally(() => setSettingsLoaded(true));
+    Promise.all([loadThemePref(), loadCardPrefs()]).finally(() => setSettingsLoaded(true));
   }, []);
 
   useEffect(() => {

@@ -47,7 +47,7 @@ export default function PeriodSheet() {
 
   return (
     <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-      <SheetHeader title={forList ? 'Період' : 'Свій період'} subtitle={subtitle} onClose={closeSheet} />
+      <SheetHeader title={forList ? 'Період' : 'Свій період'} subtitle={subtitle} />
 
       {forList ? <FilterPills options={TABS} value={tab} onChange={setTab} /> : null}
 

@@ -16,7 +16,6 @@ export default function CategorySheet() {
         listCategory.set(category);
         closeSheet();
       }}
-      onClose={closeSheet}
     />
   );
 }

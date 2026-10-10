@@ -17,7 +17,6 @@ import {
   FlatList,
   Platform,
   Pressable,
-  RefreshControl,
   StyleSheet,
   View,
   type LayoutChangeEvent,
@@ -26,7 +25,6 @@ import {
 } from 'react-native';
 import Animated, {
   useAnimatedReaction,
-  useAnimatedScrollHandler,
   useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
@@ -39,10 +37,11 @@ import { byDay, dayTotal, type Day } from '@/lib/days';
 import type { MonthKey } from '@/lib/period';
 import { clockLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
-import { usePullRefresh } from '@/lib/usePullRefresh';
+import { usePullScroll, type PullRefresh } from '@/lib/usePullRefresh';
 import type { BackdropVariant } from '@/ui/Backdrop';
 import { DayGroup } from '@/ui/DayGroup';
 import { Glass } from '@/ui/Glass';
+import { PullIndicator, PullRefreshControl } from '@/ui/PullIndicator';
 import { ScrollBackdrop } from '@/ui/ScrollBackdrop';
 import { Text } from '@/ui/Text';
 
@@ -72,6 +71,8 @@ type Props = {
   scrollY?: SharedValue<number>;
   // the month at the top of the screen while scrolling
   onTopMonth?: (m: MonthKey) => void;
+  // pull to refresh, from usePullRefresh
+  pull?: PullRefresh;
   ref?: Ref<TxListHandle>;
 };
 
@@ -97,20 +98,18 @@ export function TxList({
   floatingHeight = 0,
   scrollY,
   onTopMonth,
+  pull,
   ref,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const pull = usePullRefresh(() => list.refetch());
   const currencies = useAccountCurrencies();
   const listRef = useRef<FlatList<Item>>(null);
   // iOS already insets the content by the status bar
   const covered = overlayHeight > 0 ? overlayHeight - (Platform.OS === 'ios' ? insets.top : 0) : 0;
   const top = 11 + covered + (Platform.OS === 'android' && !overlayHeight ? insets.top : 0);
-  const offset = useSharedValue(Platform.OS === 'ios' ? -insets.top : 0);
-  const onScroll = useAnimatedScrollHandler((e) => {
-    offset.set(e.contentOffset.y);
-    scrollY?.set(e.contentOffset.y);
-  });
+  const rest = Platform.OS === 'ios' ? -insets.top : 0;
+  const offset = useSharedValue(rest);
+  const onScroll = usePullScroll({ offset, rest, pull, mirror: scrollY });
   const landAt = overlayHeight + floatingHeight + 11;
 
   const items = useMemo<Item[]>(() => {
@@ -255,6 +254,10 @@ export function TxList({
           ListHeaderComponent={
             <View style={styles.top}>
               <ScrollBackdrop variant={background} offset={offset} style={{ top: -top, left: -SIDE }} />
+              {/* under whatever is pinned over the list */}
+              {pull ? (
+                <PullIndicator offset={offset} rest={rest} top={insets.top + covered + 8} style={{ top: -top, left: -SIDE }} />
+              ) : null}
               {header}
             </View>
           }
@@ -277,11 +280,7 @@ export function TxList({
           onEndReachedThreshold={0.6}
           CellRendererComponent={monthHeader ? Cell : undefined}
           refreshControl={
-            <RefreshControl
-              refreshing={pull.refreshing}
-              onRefresh={pull.onRefresh}
-              progressViewOffset={covered}
-            />
+            pull && Platform.OS === 'android' ? <PullRefreshControl pull={pull} progressViewOffset={covered} /> : undefined
           }
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"

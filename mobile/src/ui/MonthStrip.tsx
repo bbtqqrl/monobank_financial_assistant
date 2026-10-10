@@ -82,7 +82,13 @@ export function MonthStrip({ months, active, onPick, isEnabled }: Props) {
     : { experimental_backgroundImage: `linear-gradient(150deg, ${c.cardA}, ${c.cardB})` };
 
   return (
-    <Glass radius={(H + INSET * 2) / 2} blur style={styles.capsule} contentStyle={styles.inner}>
+    <Glass
+      radius={(H + INSET * 2) / 2}
+      blur
+      style={styles.capsule}
+      // dark glass is nearly clear, and rows scrolling under it showed through
+      contentStyle={[styles.inner, dark && { backgroundColor: withAlpha(c.sheet, 0.82) }]}
+    >
       <ScrollView
         ref={scroll}
         horizontal
