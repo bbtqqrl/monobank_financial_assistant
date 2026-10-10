@@ -96,6 +96,7 @@ class TransactionRepository:
         self,
         user_id: int,
         amount: int,
+        operation_amount: int,
         time: int,
         exclude_id: int,
         account_id: int | None,
@@ -109,7 +110,8 @@ class TransactionRepository:
             .where(
                 TransactionRaw.user_id == user_id,
                 TransactionRaw.id != exclude_id,
-                TransactionRaw.amount == amount,
+                TransactionRaw.amount == -operation_amount,
+                func.coalesce(TransactionRaw.operation_amount, TransactionRaw.amount) == -amount,
                 TransactionRaw.transfer_pair_id.is_(None),
                 TransactionRaw.time.between(time - window_seconds, time + window_seconds),
                 ~and_(

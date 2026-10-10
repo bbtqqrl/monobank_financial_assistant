@@ -209,7 +209,8 @@ class CategorizationService:
 
         candidate = await self.transactions.find_unpaired_transfer_candidate(
             user_id=transaction.user_id,
-            amount=-transaction.amount,
+            amount=transaction.amount,
+            operation_amount=transaction.operation_amount if transaction.operation_amount is not None else transaction.amount,
             time=transaction.time,
             exclude_id=transaction.id,
             account_id=transaction.account_id,
