@@ -1,3 +1,4 @@
+from app.core.currencies import alpha_code
 from app.schemas.categorization import CategorizationCandidate
 
 SYSTEM_PROMPT = """You categorize transactions of a Ukrainian Monobank user.
@@ -50,17 +51,21 @@ def build_user_prompt(
     description: str,
     mcc_name: str | None,
     amount: int,
+    currency: int,
+    operation_amount: int,
+    operation_currency: int,
     counter_name: str | None,
     hints: list[str],
     candidates: list[CategorizationCandidate],
 ) -> str:
-    amount_str = f"{amount / 100:.2f}"
     direction = "outgoing" if amount < 0 else "incoming"
 
     lines = [f"Description: {description}"]
     if mcc_name:
         lines.append(f"MCC category: {mcc_name}")
-    lines.append(f"Amount: {amount_str} ({direction})")
+    lines.append(f"Amount: {amount / 100:.2f} {alpha_code(currency)} ({direction})")
+    if operation_currency != currency:
+        lines.append(f"Original amount: {operation_amount / 100:.2f} {alpha_code(operation_currency)}")
     if counter_name:
         lines.append(f"Counterparty: {counter_name}")
     for hint in hints:

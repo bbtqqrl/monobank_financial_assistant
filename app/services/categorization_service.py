@@ -131,6 +131,11 @@ class CategorizationService:
                 mcc=transaction.mcc,
                 mcc_name=await self._get_mcc_name(transaction.mcc),
                 amount=transaction.amount,
+                currency=await self._holder_currency(transaction),
+                operation_amount=(
+                    transaction.operation_amount if transaction.operation_amount is not None else transaction.amount
+                ),
+                operation_currency=transaction.currency_code,
                 counter_name=transaction.counter_name,
                 hints=await self._build_hints(transaction),
                 candidates=candidates,
