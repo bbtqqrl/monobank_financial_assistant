@@ -22,6 +22,7 @@ import { periodDays, periodFlow } from '@/lib/flow';
 import { goBack } from '@/lib/nav';
 import { monthName, periodRange, rangeLabel, type Period } from '@/lib/period';
 import { listJump, listPeriod } from '@/lib/periods';
+import { usePullRefresh } from '@/lib/usePullRefresh';
 import { Backdrop } from '@/ui/Backdrop';
 import { EmptyState } from '@/ui/EmptyState';
 import { FilterPills } from '@/ui/FilterPills';
@@ -110,6 +111,10 @@ export default function TransactionsScreen() {
   const { months, isEnabled } = useFeedMonths(custom ? undefined : loadedOldest, categoryId);
   const listRef = useRef<TxListHandle>(null);
   const [overlayH, setOverlayH] = useState(0);
+  const pull = usePullRefresh(async () => {
+    const result = await list.refetch();
+    if (result.isError) throw result.error;
+  });
   const [active, setActive] = useState<MonthKey>(() => months[months.length - 1]!);
   // a month to scroll to once it's loaded
   const pending = useRef<MonthKey | null>(null);
@@ -204,6 +209,7 @@ export default function TransactionsScreen() {
         floatingHeight={custom ? 0 : STRIP_SPACE}
         scrollY={scrollY}
         monthHeader={custom ? undefined : monthHeader}
+        pull={pull}
         onTopMonth={(m) => {
           if (Date.now() < lockedUntil.current || sameMonth(m, active)) return;
           setActive(m);
@@ -286,6 +292,7 @@ export default function TransactionsScreen() {
       >
         <Header
           title="Транзакції"
+          status={pull.status}
           left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
           right={{ icon: 'search', label: 'Пошук', onPress: () => router.push('/search') }}
         />

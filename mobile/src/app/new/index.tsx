@@ -9,7 +9,7 @@ import { toBrief, useCategories } from '@/api/categories';
 import { ApiError } from '@/api/client';
 import { useCreateTransaction } from '@/api/transactions';
 import { categoryLook } from '@/lib/categories';
-import { cardOrder } from '@/lib/cardOrder';
+import { cardOrder, hiddenCards } from '@/lib/cardOrder';
 import { DRAFT_KINDS, QUICK_SLUGS, draftCategory, type DraftDirection } from '@/lib/draft';
 import { failure, success, tap } from '@/lib/haptics';
 import { formatMoney, parseAmount, UAH } from '@/lib/money';
@@ -56,6 +56,7 @@ export default function NewTransactionSheet() {
   const create = useCreateTransaction();
   const category = draftCategory.useValue();
   const order = cardOrder.useValue();
+  const hidden = hiddenCards.useValue();
   const [direction, setDirection] = useState<DraftDirection>('expense');
   const [amountText, setAmountText] = useState('');
   const [description, setDescription] = useState('');
@@ -162,7 +163,7 @@ export default function NewTransactionSheet() {
 
         <Section title="Рахунок">
           <AccountTiles
-            accounts={sortedAccounts(accounts.data ?? [], order)}
+            accounts={sortedAccounts(accounts.data ?? [], order).filter((a) => !hidden.includes(a.id))}
             value={accountId}
             onChange={setAccountId}
           />

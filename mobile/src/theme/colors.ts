@@ -5,9 +5,9 @@ const light = {
   sheet: '#F7F5F1',
   ink: '#1A1714',
   inkSoft: '#3A322B',
-  muted: '#837C74',
-  faint: '#9C948B',
-  ghost: '#A49B91',
+  muted: '#706961',
+  faint: '#7A7269',
+  ghost: '#8B8279',
   // small labels straight on the coloured backdrop, ghost is too faint there
   onBackdrop: '#625A52',
   cream: '#FBF8F3',

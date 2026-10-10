@@ -4,12 +4,13 @@ import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
 import { signOut } from '@/api/auth';
 import { goBack } from '@/lib/nav';
-import { useTheme, withAlpha } from '@/theme';
+import { useTheme } from '@/theme';
 import { pickTheme } from '@/theme/pickTheme';
 import { THEME_LABELS, useThemePref } from '@/theme/preference';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
 import { Icon } from '@/ui/icons/Icon';
+import { ProfileCard } from '@/ui/ProfileCard';
 import { Screen } from '@/ui/Screen';
 import { SettingRow } from '@/ui/SettingRow';
 import { Text } from '@/ui/Text';
@@ -24,8 +25,9 @@ export default function ProfileScreen() {
       <Header
         title="Профіль"
         left={{ icon: 'chevronLeft', label: 'Назад', weight: 1.9, onPress: goBack }}
-        right={{ icon: 'gear', label: 'Налаштування' }}
       />
+
+      <ProfileCard />
 
       {/* Figma: 4 16 4 16 */}
       <Glass contentStyle={styles.settings}>
@@ -40,22 +42,21 @@ export default function ProfileScreen() {
           setBusy(true);
           signOut();
         }}
-        style={({ pressed }) => [
-          styles.logout,
-          { backgroundColor: withAlpha(c.danger, 0.1), borderColor: withAlpha(c.danger, 0.22) },
-          pressed && styles.pressed,
-        ]}
+        style={({ pressed }) => pressed && styles.pressed}
       >
-        {busy ? (
-          <ActivityIndicator color={c.danger} />
-        ) : (
-          <>
-            <Icon name="logout" size={17} color={c.danger} weight={1.9} />
-            <Text variant="bodyStrong" tone="danger" style={styles.logoutLabel}>
-              Вийти з акаунта
-            </Text>
-          </>
-        )}
+        {/* plain glass with a red label: a red tint over the backdrop turns muddy */}
+        <Glass radius={17} contentStyle={styles.logout}>
+          {busy ? (
+            <ActivityIndicator color={c.danger} />
+          ) : (
+            <>
+              <Icon name="logout" size={17} color={c.danger} weight={1.9} />
+              <Text variant="bodyStrong" tone="danger" style={styles.logoutLabel}>
+                Вийти з акаунта
+              </Text>
+            </>
+          )}
+        </Glass>
       </Pressable>
 
     </Screen>
@@ -66,8 +67,6 @@ const styles = StyleSheet.create({
   settings: { paddingVertical: 4, paddingHorizontal: 16 },
   logout: {
     height: 48,
-    borderRadius: 17,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',

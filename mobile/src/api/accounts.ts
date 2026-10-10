@@ -7,7 +7,7 @@ import { UAH } from '@/lib/money';
 import { api } from './client';
 
 // GET /accounts, same fields as the backend's AccountResponse
-const AccountSchema = z.object({
+export const AccountSchema = z.object({
   id: z.number().int(),
   mono_account_id: z.string(),
   account_type: z.string(),

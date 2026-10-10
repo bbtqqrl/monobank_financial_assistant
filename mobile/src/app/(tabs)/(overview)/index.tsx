@@ -1,9 +1,11 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { accountLabel, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
+import { REFRESH_FLASH, refreshAccounts } from '@/api/monobank';
 import { useMonthSpend, useTransactions } from '@/api/transactions';
-import { cardOrder } from '@/lib/cardOrder';
+import { cardOrder, hiddenCards } from '@/lib/cardOrder';
 import { thud } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
 import { monthLabel, whenLabel } from '@/lib/time';
@@ -22,11 +24,18 @@ const openCards = () => {
 };
 
 export default function OverviewScreen() {
+  const qc = useQueryClient();
   const accounts = useAccounts();
   const spend = useMonthSpend();
   const month = monthLabel();
   const order = cardOrder.useValue();
-  const cards = sortedAccounts(accounts.data ?? [], order).map((a) => {
+  const hidden = hiddenCards.useValue();
+  const all = sortedAccounts(accounts.data ?? [], order);
+  const visible = all.filter((a) => !hidden.includes(a.id));
+  // with every card hidden (e.g. the last shown one was closed) the screen
+  // would read as "not connected", so then they all show
+  const shown = visible.length > 0 ? visible : all;
+  const cards = shown.map((a) => {
     const spent = spend.data?.get(a.id);
     return {
       key: a.id,
@@ -43,14 +52,20 @@ export default function OverviewScreen() {
   const currencies = useAccountCurrencies();
   const rows = currencies && recent.data?.map((t) => txRow(t, currencies, whenLabel(t.time)));
 
-  const pull = usePullRefresh(() => Promise.allSettled([accounts.refetch(), spend.refetch(), recent.refetch()]));
+  const pull = usePullRefresh(async () => {
+    // refetch() doesn't throw, it leaves the error in the query
+    const [balances] = await Promise.all([refreshAccounts(qc), spend.refetch(), recent.refetch()]);
+    return REFRESH_FLASH[balances];
+  });
 
   // TODO: background="none" again once the map backdrop is in
   return (
-    <Screen background="warm" refreshing={pull.refreshing} onRefresh={pull.onRefresh}>
+    <Screen background="warm" pull={pull}>
       <Header
         title="Огляд"
+        status={pull.status}
         left={{ icon: 'person', label: 'Профіль', onPress: () => router.push('/profile') }}
+        // TODO: notifications screen
         right={{ icon: 'bell', label: 'Сповіщення' }}
       />
 

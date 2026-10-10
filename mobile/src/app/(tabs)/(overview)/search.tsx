@@ -11,6 +11,7 @@ import { searchPeriod } from '@/lib/periods';
 import { plural } from '@/lib/plural';
 import { addRecentSearch, useRecentSearches } from '@/lib/recentSearches';
 import { useDebounced } from '@/lib/useDebounced';
+import { usePullRefresh } from '@/lib/usePullRefresh';
 import { useTheme, withAlpha } from '@/theme';
 import { EmptyState } from '@/ui/EmptyState';
 import { Glass } from '@/ui/Glass';
@@ -29,6 +30,10 @@ export default function SearchScreen() {
   const period = searchPeriod.useValue();
   const active = search.length >= MIN_LENGTH;
   const list = useTransactionPages({ search, ...periodRange(period) }, active);
+  const pull = usePullRefresh(async () => {
+    const result = await list.refetch();
+    if (result.isError) throw result.error;
+  });
   const currencies = useAccountCurrencies();
   const recent = useRecentSearches();
 
@@ -144,7 +149,7 @@ export default function SearchScreen() {
     <View />
   );
 
-  return <TxList list={list} header={header} empty={empty} />;
+  return <TxList list={list} header={header} empty={empty} pull={pull} />;
 }
 
 const styles = StyleSheet.create({

@@ -23,7 +23,6 @@ type Props = {
   // the row being saved shows a spinner, the others wait
   busyId?: number;
   onPick: (category: CategoryBrief | null) => void;
-  onClose: () => void;
 };
 
 const SECTIONS: { kind: CategoryKind; title: string }[] = [
@@ -43,7 +42,7 @@ const look = (c: CategoryBrief) => categoryLook(c.slug, c.kind === 'income' ? 1 
 // Searchable category tree for a sheet. The iOS sheet sizes its scroll view
 // itself and expects exactly two children: a header that keeps its own native
 // view, and the list.
-export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, kinds, busyId, onPick, onClose }: Props) {
+export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, kinds, busyId, onPick }: Props) {
   const insets = useSafeAreaInsets();
   const categories = useCategories();
   const [query, setQuery] = useState('');
@@ -74,7 +73,7 @@ export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, ki
   return (
     <>
       <View collapsable={false} style={styles.top}>
-        <SheetHeader title={title} subtitle={subtitle} onClose={onClose} />
+        <SheetHeader title={title} subtitle={subtitle} />
         <View style={styles.search}>
           <SearchField value={query} onChangeText={setQuery} placeholder="Пошук категорії" returnKeyType="done" />
         </View>

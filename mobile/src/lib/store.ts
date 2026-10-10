@@ -22,3 +22,5 @@ export function createStore<T>(initial: T) {
     useValue: () => useSyncExternalStore(subscribe, () => value),
   };
 }
+
+export type Store<T> = ReturnType<typeof createStore<T>>;
