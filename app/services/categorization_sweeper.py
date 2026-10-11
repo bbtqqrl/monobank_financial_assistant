@@ -1,12 +1,18 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
+
+from app.core.tasks import spawn
+from app.db.models.user import User
 from app.db.session import SessionLocal
 from app.repositories.transaction import TransactionRepository
 from app.services.ai.factory import get_categorization_ai_client
 from app.services.categorization_service import CategorizationAIError, CategorizationService
 from app.services.exchange_rates import amount_uah
+from app.services.statement_backfill_service import run_statement_backfill
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +25,7 @@ STALE_AFTER = timedelta(minutes=20)
 # giving up and flagging the transaction for manual review.
 GIVE_UP_AFTER = timedelta(hours=24)
 SWEEP_BATCH_SIZE = 200
+CATCH_UP_INTERVAL_SECONDS = 24 * 60 * 60
 SWEEP_CONCURRENCY = 4
 
 
@@ -68,8 +75,26 @@ async def fill_missing_amount_uah() -> None:
         logger.info("Sweeper: filled amount_uah for %s of %s transaction(s)", filled, len(rows))
 
 
+async def catch_up_statements() -> None:
+    async with SessionLocal() as db:
+        users = (await db.execute(
+            select(User.id, User.mono_token).where(User.is_active.is_(True), User.mono_token.is_not(None))
+        )).all()
+    for user_id, token in users:
+        spawn(run_statement_backfill(user_id, token, catch_up=True))
+    if users:
+        logger.info("Sweeper: started statement catch-up for %s user(s)", len(users))
+
+
 async def run_sweeper_forever() -> None:
+    last_catch_up: float | None = None
     while True:
+        if last_catch_up is None or time.monotonic() - last_catch_up >= CATCH_UP_INTERVAL_SECONDS:
+            try:
+                await catch_up_statements()
+                last_catch_up = time.monotonic()
+            except Exception:
+                logger.exception("Statement catch-up failed")
         try:
             await fill_missing_amount_uah()
         except Exception:

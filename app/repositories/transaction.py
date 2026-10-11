@@ -287,6 +287,16 @@ class TransactionRepository:
         )
         return list(result.all())
 
+    async def last_mono_time(self, account_id: int | None, jar_id: int | None) -> int | None:
+        result = await self.db.execute(
+            select(func.max(TransactionRaw.time)).where(
+                TransactionRaw.source == "monobank",
+                TransactionRaw.account_id.is_not_distinct_from(account_id),
+                TransactionRaw.jar_id.is_not_distinct_from(jar_id),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_for_categorization(self, transaction_id: int) -> Optional[TransactionRaw]:
         """Lock the row for the rest of the DB transaction. Returns None if it
         doesn't exist or another worker already holds it."""
