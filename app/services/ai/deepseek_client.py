@@ -31,6 +31,7 @@ class DeepSeekCategorizationAIClient(CategorizationAIClient):
     ) -> CategorizationResult:
         user_prompt = build_user_prompt(
             description=description,
+            mcc=mcc,
             mcc_name=mcc_name,
             amount=amount,
             currency=currency,

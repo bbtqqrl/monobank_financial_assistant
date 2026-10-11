@@ -6,34 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models.user import User
-from app.db.session import SessionLocal, get_db
+from app.db.session import get_db
 from app.schemas.monobank import ConnectMonobankRequest, ConnectMonobankResponse, MonobankRefreshResponse
-from app.services.statement_backfill_service import StatementBackfillService
+from app.services.statement_backfill_service import run_statement_backfill
 from app.core.config import MONO_WEBHOOK_URL
 from app.services.sync_service import MonobankNotConnectedError, MonobankSyncService, WebhookRegistrationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/monobank", tags=["Monobank"])
-
-
-# Users with a backfill already running in this process. A second one would
-# only compete for the same 1-per-60s statement rate limit.
-_backfilling_users: set[int] = set()
-
-
-async def run_statement_backfill(user_id: int, token: str) -> None:
-    if user_id in _backfilling_users:
-        logger.info("Statement backfill already running for user_id=%s, skipping", user_id)
-        return
-    _backfilling_users.add(user_id)
-    try:
-        async with SessionLocal() as db:
-            await StatementBackfillService(db).backfill(user_id, token)
-    except Exception:
-        logger.exception("Statement backfill crashed for user_id=%s", user_id)
-    finally:
-        _backfilling_users.discard(user_id)
 
 
 @router.post("/connect",response_model=ConnectMonobankResponse,)
@@ -48,7 +29,7 @@ async def connect_monobank(
 
         client_info = await service.connect(current_user, data.token)
 
-        background_tasks.add_task(run_statement_backfill, current_user.id, data.token)
+        background_tasks.add_task(run_statement_backfill, current_user.id, data.token, catch_up=True)
 
         return ConnectMonobankResponse(
             success=True,

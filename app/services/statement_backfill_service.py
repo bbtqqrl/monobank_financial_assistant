@@ -22,6 +22,23 @@ STATEMENT_RATE_LIMIT_SECONDS = 60
 # first; a full page means there's more to fetch further back.
 STATEMENT_PAGE_SIZE = 500
 AI_CONCURRENCY = 8
+CATCH_UP_OVERLAP_SECONDS = 3600
+
+_backfilling_users: set[int] = set()
+
+
+async def run_statement_backfill(user_id: int, token: str, catch_up: bool = False) -> None:
+    if user_id in _backfilling_users:
+        logger.info("Statement backfill already running for user_id=%s, skipping", user_id)
+        return
+    _backfilling_users.add(user_id)
+    try:
+        async with SessionLocal() as db:
+            await StatementBackfillService(db).backfill(user_id, token, catch_up=catch_up)
+    except Exception:
+        logger.exception("Statement backfill crashed for user_id=%s", user_id)
+    finally:
+        _backfilling_users.discard(user_id)
 
 
 class StatementBackfillService:
@@ -34,20 +51,20 @@ class StatementBackfillService:
         self._last_statement_call: float | None = None
         self._ai_semaphore = asyncio.Semaphore(AI_CONCURRENCY)
 
-    async def backfill(self, user_id: int, token: str) -> None:
+    async def backfill(self, user_id: int, token: str, catch_up: bool = False) -> None:
         accounts = [
             a for a in await self.accounts.list_for_user(user_id)
-            if a.is_active and a.statement_backfilled_at is None
+            if a.is_active and (catch_up or a.statement_backfilled_at is None)
         ]
         jars = [
             j for j in await self.jars.list_for_user(user_id)
-            if j.is_active and j.statement_backfilled_at is None
+            if j.is_active and (catch_up or j.statement_backfilled_at is None)
         ]
         if not accounts and not jars:
             return
 
         to_ts = int(datetime.now(timezone.utc).timestamp())
-        from_ts = to_ts - BACKFILL_DAYS * 86400
+        oldest_ts = to_ts - BACKFILL_DAYS * 86400
 
         # Each account's transactions are categorized as soon as they're
         # stored, overlapping with the rate-limit wait before the next account,
@@ -55,6 +72,7 @@ class StatementBackfillService:
         categorization_tasks: list[asyncio.Task] = []
         try:
             for account in accounts:
+                from_ts = await self._from_ts(account.id, None, account.statement_backfilled_at, oldest_ts)
                 created_ids = await self._fetch_and_store(
                     user_id, token, account.mono_account_id, from_ts, to_ts,
                     account_id=account.id, jar_id=None, currency=account.currency_code,
@@ -65,6 +83,7 @@ class StatementBackfillService:
                     categorization_tasks.append(asyncio.create_task(self._categorize_all(created_ids)))
 
             for jar in jars:
+                from_ts = await self._from_ts(None, jar.id, jar.statement_backfilled_at, oldest_ts)
                 created_ids = await self._fetch_and_store(
                     user_id, token, jar.mono_jar_id, from_ts, to_ts,
                     account_id=None, jar_id=jar.id, currency=jar.currency_code,
@@ -76,6 +95,14 @@ class StatementBackfillService:
         finally:
             await self.api.close()
             await asyncio.gather(*categorization_tasks)
+
+    async def _from_ts(
+        self, account_id: int | None, jar_id: int | None, backfilled_at: datetime | None, oldest_ts: int,
+    ) -> int:
+        if backfilled_at is None:
+            return oldest_ts
+        anchor = await self.transactions.last_mono_time(account_id, jar_id) or int(backfilled_at.timestamp())
+        return max(anchor - CATCH_UP_OVERLAP_SECONDS, oldest_ts)
 
     async def _get_statement(self, token: str, mono_id: str, from_ts: int, to_ts: int) -> list[dict]:
         """Monobank allows one statement request per 60s per token, across

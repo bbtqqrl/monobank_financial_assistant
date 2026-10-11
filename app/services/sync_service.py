@@ -40,6 +40,7 @@ class MonobankSyncService:
                 await self._deactivate_previous_accounts(user)
 
             user.mono_client_id = client_info["clientId"]
+            user.mono_name = client_info.get("name")
             user.mono_token = token
 
             await self._sync_accounts(user, client_info.get("accounts", []))
@@ -76,6 +77,7 @@ class MonobankSyncService:
         finally:
             await self.api.close()
 
+        user.mono_name = client_info.get("name")
         await self._sync_accounts(user, client_info.get("accounts", []))
         await self._sync_jars(user, client_info.get("jars", []))
         await self.db.commit()

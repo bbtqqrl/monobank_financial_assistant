@@ -1,10 +1,12 @@
 import logging
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
 from app.db.models.mcc_codes import MccCode
+from app.db.models.user import User
 from app.repositories.account import AccountRepository
 from app.repositories.category import CategoryRepository
 from app.repositories.jar import JarRepository
@@ -58,6 +60,13 @@ def _mapping_fits_direction(kind: str, amount: int) -> bool:
     if kind == "income":
         return amount > 0
     return True
+
+
+def _names_holder(holder_name: str, *texts: str | None) -> bool:
+    words = {word for word in holder_name.lower().split() if len(word) > 2}
+    if not words:
+        return False
+    return any(text and words <= set(re.findall(r"\w+", text.lower())) for text in texts)
 
 
 class CategorizationService:
@@ -184,6 +193,19 @@ class CategorizationService:
         itself - mostly whether the money stays within the user's own
         accounts, which decides transfer vs income/expense."""
         hints: list[str] = []
+
+        user = await self.db.get(User, transaction.user_id)
+        if user is not None and user.mono_name:
+            hints.append(f"Account holder (the user) name: {user.mono_name}.")
+            if _names_holder(user.mono_name, transaction.description, transaction.counter_name):
+                hints.append(
+                    "The counterparty is the account holder themself: the money moves from or to "
+                    "their own account in another bank, so its source is unknown."
+                )
+
+        own_jars = [j.title for j in await self.jars.list_for_user(transaction.user_id) if j.is_active]
+        if own_jars:
+            hints.append("User's own jars: " + ", ".join(f"«{title}»" for title in own_jars) + ".")
 
         if transaction.jar_id is not None:
             jar = await self.jars.get_by_id_for_user(transaction.jar_id, transaction.user_id)
