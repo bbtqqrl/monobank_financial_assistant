@@ -1,4 +1,5 @@
 import jwt
+import sentry_sdk
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,4 +32,5 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_error
 
+    sentry_sdk.set_user({"id": user.id})
     return user

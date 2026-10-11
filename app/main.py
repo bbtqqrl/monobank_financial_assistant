@@ -6,6 +6,21 @@ import uvicorn
 import logging
 
 logging.basicConfig(level=logging.INFO)
+
+import sentry_sdk
+
+from app.core.config import SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_TRACES_SAMPLE_RATE
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=False,
+        max_request_body_size="never",
+        include_local_variables=False,
+    )
+
 from app.api.accounts import router as accounts_router
 from app.api.auth import router as auth_router
 from app.api.budgets import router as budgets_router
