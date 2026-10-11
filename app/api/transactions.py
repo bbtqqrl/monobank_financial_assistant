@@ -52,6 +52,7 @@ def _to_list_item(transaction, category, account_currency_code: int) -> Transact
         account_id=transaction.account_id,
         jar_id=transaction.jar_id,
         transfer_pair_id=transaction.transfer_pair_id,
+        merchant_mapping_id=transaction.merchant_mapping_id,
         category=_category_brief(category),
         category_source=transaction.category_source,
         category_confidence=transaction.category_confidence,
