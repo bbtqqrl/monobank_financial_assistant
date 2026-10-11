@@ -12,4 +12,5 @@ pydantic[email]
 cryptography
 tzdata
 openai
+sentry-sdk
 sqlalchemy[asyncio]
