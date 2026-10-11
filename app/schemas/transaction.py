@@ -23,6 +23,7 @@ class TransactionListItem(BaseModel):
     account_id: int | None
     jar_id: int | None
     transfer_pair_id: int | None
+    merchant_mapping_id: int | None
     category: CategoryBrief | None
     category_source: str | None
     category_confidence: float | None

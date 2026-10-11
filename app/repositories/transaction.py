@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,6 +296,17 @@ class TransactionRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def apply_mapping_category(self, mapping_id: int, category_id: int) -> int:
+        result = await self.db.execute(
+            update(TransactionRaw)
+            .where(
+                TransactionRaw.merchant_mapping_id == mapping_id,
+                TransactionRaw.category_source.is_distinct_from("user"),
+            )
+            .values(category_id=category_id, category_source="mapping", category_confidence=None)
+        )
+        return result.rowcount
 
     async def get_for_categorization(self, transaction_id: int) -> Optional[TransactionRaw]:
         """Lock the row for the rest of the DB transaction. Returns None if it

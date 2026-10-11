@@ -173,7 +173,7 @@ class CategorizationService:
         )
 
         if transaction.mcc is not None and _mapping_fits_direction(category.kind, transaction.amount):
-            await self.mappings.upsert(
+            mapping = await self.mappings.upsert(
                 user_id=transaction.user_id,
                 merchant_key=merchant_key,
                 mcc=transaction.mcc,
@@ -181,6 +181,7 @@ class CategorizationService:
                 source=source,
                 confidence=confidence,
             )
+            transaction.merchant_mapping_id = mapping.id
 
         await self.db.commit()
         logger.info(
@@ -319,19 +320,9 @@ class CategorizationService:
             raise ValueError("Category not found or not selectable")
         check_category_fits_amount(category.kind, transaction.amount)
 
-        self.transactions.set_category(transaction, category_id=category.id, source="user")
-
-        # A refund re-labelled by hand says nothing about the merchant's
-        # purchases, so it doesn't overwrite the merchant's mapping.
-        if transaction.mcc is not None and _mapping_fits_direction(category.kind, transaction.amount):
-            merchant_key = build_merchant_key(transaction.description)
-            await self.mappings.upsert(
-                user_id=transaction.user_id,
-                merchant_key=merchant_key,
-                mcc=transaction.mcc,
-                category_id=category.id,
-                source="user",
-            )
+        self.transactions.set_category(
+            transaction, category_id=category.id, source="user", merchant_mapping_id=transaction.merchant_mapping_id,
+        )
 
         await self.db.commit()
         logger.info(

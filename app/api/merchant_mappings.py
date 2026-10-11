@@ -8,6 +8,7 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.repositories.category import CategoryRepository
 from app.repositories.merchant_mapping import MerchantCategoryMappingRepository
+from app.repositories.transaction import TransactionRepository
 from app.schemas.merchant_mapping import MerchantMappingResponse, UpdateMerchantMappingRequest
 from app.schemas.transaction import CategoryBrief
 
@@ -53,6 +54,7 @@ async def update_merchant_mapping(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found or not selectable")
 
     repo.update_category(mapping, category.id)
+    await TransactionRepository(db).apply_mapping_category(mapping.id, category.id)
     await db.commit()
 
     return _to_response(mapping, category)
