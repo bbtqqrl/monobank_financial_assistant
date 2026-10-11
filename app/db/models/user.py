@@ -26,6 +26,7 @@ class User(Base):
 
     mono_client_id: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
     mono_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    mono_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
     accounts: Mapped[list["MonoAccount"]] = relationship(
         back_populates="user",

@@ -6,11 +6,12 @@ SYSTEM_PROMPT = """You categorize transactions of a Ukrainian Monobank user.
 Each category has a kind:
 - expense: money the user spent.
 - income: money the user received from outside (salary, business income,
-  transfers from other people, cashback, interest, sales).
+  transfers from other people, cashback, interest, sales, and any incoming
+  money whose source is unknown).
 - transfer: the user's own money moving - between their own cards or
-  accounts, to or from their jars (savings), cash withdrawal, top-ups from
-  their other banks, currency exchange, taking or repaying a loan,
-  investments. Neither income nor expense.
+  accounts, to or from their jars (savings), cash withdrawal, currency
+  exchange, taking or repaying a loan, investments. Neither income nor
+  expense.
 - unknown: use only when nothing else fits.
 
 Given a transaction (description, amount and direction, MCC name if known,
@@ -24,11 +25,33 @@ Rules:
 - category_slug MUST exactly match one of the provided slugs.
 - An outgoing payment (expense direction) is never income.
 - Money coming back from a shop or service is a refund: choose the expense
-  category that the original purchase would have had.
+  category that the original purchase would have had. A description starting
+  with "Скасування" is a cancelled purchase, so it is a refund too.
 - Hints about the user's own accounts or jars are reliable facts: such
   movements are transfers.
 - Money sent to or received from another private person is an expense or
   income respectively, unless hints say the counterparty is the user.
+- Only when the hints give the account holder's name and the counterparty or
+  description names that same person (any spelling, word order or
+  transliteration, with or without patronymic), the money comes from the
+  user's own account in another bank. It may be salary, business income or
+  the user's own savings: choose the income category for money from other
+  banks, with confidence of at most 0.5. It is not a transfer from another
+  person.
+  Without such a hint, or for any other name, the person is someone else.
+- A top-up of, or withdrawal from, one of the user's own jars listed in the
+  hints is a transfer to or from savings. A jar that is not in that list
+  belongs to someone else.
+- Cash put in through a terminal (a bank's own terminal such as "Термінал mono"
+  or "Термінал А-Банку", or a payment terminal network such as City24, iBox or
+  EasyPay) has an unknown source (see the rule below). The cash category is
+  only for withdrawing cash (outgoing money).
+- Incoming money whose source you cannot determine is income: choose the
+  generic "other income" category with confidence of at most 0.5. Choose a
+  more specific income category (salary, transfers from people, cashback,
+  interest, sales) only when the description or counterparty makes it clear.
+- Choose the most specific category that fits. Choose a parent category only
+  when none of its subcategories fits.
 - Loans and credit products of the bank (taking a credit, repaying it) are
   transfers, not income or expense.
 - If MCC name is unavailable, decide from the merchant, description, amount,
@@ -49,6 +72,7 @@ _KIND_TITLES = {
 
 def build_user_prompt(
     description: str,
+    mcc: int | None,
     mcc_name: str | None,
     amount: int,
     currency: int,
@@ -61,8 +85,8 @@ def build_user_prompt(
     direction = "outgoing" if amount < 0 else "incoming"
 
     lines = [f"Description: {description}"]
-    if mcc_name:
-        lines.append(f"MCC category: {mcc_name}")
+    if mcc is not None:
+        lines.append(f"MCC: {mcc}" + (f" ({mcc_name})" if mcc_name else ""))
     lines.append(f"Amount: {amount / 100:.2f} {alpha_code(currency)} ({direction})")
     if operation_currency != currency:
         lines.append(f"Original amount: {operation_amount / 100:.2f} {alpha_code(operation_currency)}")
