@@ -34,6 +34,8 @@ const TransactionSchema = z.object({
   account_id: int.nullable(),
   jar_id: int.nullable(),
   transfer_pair_id: int.nullable(),
+  // the merchant's remembered category; changing that moves its other purchases too
+  merchant_mapping_id: int.nullable(),
   category: CategoryBriefSchema.nullable(),
   // ai, ai_low_confidence, mapping, mapping_low_confidence, rule, user, ai_failed
   category_source: z.string().nullable(),
@@ -171,18 +173,45 @@ export function useCreateTransaction() {
   });
 }
 
-// PATCH /transactions/{id}/category. The backend also remembers the choice for
-// the merchant (when there's an MCC), so later purchases there follow it.
+// the AI picked the category but wasn't sure, directly or through a merchant
+// remembered from such a guess
+export const isUnsure = (t: Transaction) =>
+  t.category_source === 'ai_low_confidence' || t.category_source === 'mapping_low_confidence';
+
+// The backend files what the AI couldn't place under an "unknown" kind
+// category («Невідоме»); to the user that's simply no category yet
+export const isUncategorized = (t: Transaction) => !t.category || t.category.kind === 'unknown';
+
+export const categoryName = (t: Transaction) =>
+  t.category && t.category.kind !== 'unknown' ? t.category.name : 'Без категорії';
+
+// worth a second look: an unsure guess or none at all (not while still categorizing)
+export const needsReview = (t: Transaction) =>
+  isUnsure(t) || t.category_source === 'ai_failed' || (t.category?.kind === 'unknown' && t.source !== 'manual');
+
+export type CategoryChange = {
+  category: CategoryBrief;
+  // also the merchant's other purchases, past and future
+  mappingId?: number;
+};
+
+// PATCH /transactions/{id}/category changes just this one. With a mapping it
+// first goes through PATCH /merchant-mappings/{id}, which moves the merchant's
+// other purchases too (except the ones changed by hand) and the ones to come.
 export function useSetCategory(id: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (category: CategoryBrief) =>
-      api(TransactionDetailSchema, `/transactions/${id}/category`, {
+    mutationFn: async ({ category, mappingId }: CategoryChange) => {
+      if (mappingId !== undefined) {
+        await request(`/merchant-mappings/${mappingId}`, { method: 'PATCH', body: { category_id: category.id } });
+      }
+      return api(TransactionDetailSchema, `/transactions/${id}/category`, {
         method: 'PATCH',
         body: { category_id: category.id },
-      }),
+      });
+    },
     // the details screen under the sheet changes right away
-    onMutate: async (category) => {
+    onMutate: async ({ category }) => {
       await qc.cancelQueries({ queryKey: ['transaction', id] });
       const before = qc.getQueryData<TransactionDetail>(['transaction', id]);
       if (before) {
@@ -195,11 +224,15 @@ export function useSetCategory(id: number) {
       }
       return { before };
     },
-    onError: (_error, _category, context) => {
+    onError: (_error, _change, context) => {
       if (context?.before) qc.setQueryData(['transaction', id], context.before);
     },
     onSuccess: (detail) => qc.setQueryData(['transaction', id], detail),
-    onSettled: () => refreshLists(qc),
+    onSettled: (_detail, _error, { mappingId }) => {
+      refreshLists(qc);
+      // other purchases from the merchant may have open details too
+      if (mappingId !== undefined) qc.invalidateQueries({ queryKey: ['transaction'] });
+    },
   });
 }
 

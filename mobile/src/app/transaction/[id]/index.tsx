@@ -5,7 +5,9 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-nat
 import { accountLabel, useAccountCurrencies, useAccounts } from '@/api/accounts';
 import { ApiError } from '@/api/client';
 import {
+  categoryName,
   foreignPart,
+  isUncategorized,
   txCurrency,
   useDeleteTransaction,
   useTransaction,
@@ -24,23 +26,25 @@ import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 
 // where the category came from, see category_source in the backend
-function sourceLine(t: TransactionDetail): { icon: IconName; text: string } {
+function sourceLine(t: TransactionDetail): { icon: IconName; text: string; unsure?: boolean } {
   if (t.source === 'manual') return { icon: 'pencil', text: 'Додано вручну' };
-  const pct = t.category_confidence !== null ? ` · ${Math.round(t.category_confidence * 100)}%` : '';
+  if (t.category_source === 'ai_failed' || (t.category_source !== null && isUncategorized(t))) {
+    return { icon: 'sparkle', text: 'Обери категорію', unsure: true };
+  }
   switch (t.category_source) {
     case 'user':
       return { icon: 'pencil', text: 'Обрано вручну' };
+    case 'pair':
+      return { icon: 'transfer', text: 'Переказ між своїми' };
     case 'rule':
       return { icon: 'list', text: 'За кодом MCC' };
     case 'mapping':
-      return { icon: 'repeat', text: `Як раніше для «${t.description}»` };
+      return { icon: 'repeat', text: 'Як минулого разу' };
     case 'ai':
-      return { icon: 'sparkle', text: `Визначено автоматично${pct}` };
+      return { icon: 'sparkle', text: 'Автоматично' };
     case 'mapping_low_confidence':
     case 'ai_low_confidence':
-      return { icon: 'sparkle', text: `Невпевнено${pct} · перевір` };
-    case 'ai_failed':
-      return { icon: 'close', text: 'Не вдалося визначити' };
+      return { icon: 'sparkle', text: 'Перевір категорію', unsure: true };
     default:
       return { icon: 'sparkle', text: 'Ще визначаємо' };
   }
@@ -147,10 +151,10 @@ export default function TransactionScreen() {
             <CategoryChip {...look} size={36} radius={12} />
             <View style={styles.categoryText}>
               <Text variant="bodyStrong" style={styles.categoryName}>
-                {t.category?.name ?? 'Без категорії'}
+                {categoryName(t)}
               </Text>
               <View style={styles.source}>
-                <Icon name={src.icon} size={11} color={c.accent} weight={2.2} />
+                <Icon name={src.icon} size={11} color={src.unsure ? c.warning : c.accent} weight={2.2} />
                 <Text variant="rowCaption" tone="muted" style={styles.sourceText}>
                   {src.text}
                 </Text>

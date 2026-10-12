@@ -1,16 +1,26 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Alert } from 'react-native';
 
 import { useAccountCurrencies } from '@/api/accounts';
 import type { CategoryKind } from '@/api/categories';
 import { ApiError } from '@/api/client';
-import { txCurrency, useSetCategory, useTransaction } from '@/api/transactions';
+import { isUncategorized, isUnsure, txCurrency, useSetCategory, useTransaction, type Transaction } from '@/api/transactions';
 import { formatMoney } from '@/lib/money';
 import { dayLabel } from '@/lib/time';
 import { CategoryPicker } from '@/ui/CategoryPicker';
+import { Segmented } from '@/ui/Segmented';
 
-// money going out is never income, the backend turns that down
-const OUTGOING_KINDS: readonly CategoryKind[] = ['expense', 'transfer', 'unknown'];
+type Scope = 'one' | 'merchant';
+
+// Categories that fit the money's direction. Going out it's never income (the
+// backend turns that down). Coming in it's income, unless it may be a refund:
+// already in a spending category, or with no category to tell.
+function kindsFor(t: Transaction): readonly CategoryKind[] {
+  if (t.amount < 0) return ['expense', 'transfer'];
+  if (t.category?.kind === 'expense' || isUncategorized(t)) return ['expense', 'income', 'transfer'];
+  return ['income', 'transfer'];
+}
 
 // Change category sheet over the transaction details (Figma: ChangeCategory)
 export default function ChangeCategorySheet() {
@@ -18,6 +28,7 @@ export default function ChangeCategorySheet() {
   const tx = useTransaction(Number(id));
   const currencies = useAccountCurrencies();
   const change = useSetCategory(Number(id));
+  const [scope, setScope] = useState<Scope>('one');
   const t = tx.data;
 
   const close = () => {
@@ -30,33 +41,56 @@ export default function ChangeCategorySheet() {
         .filter(Boolean)
         .join(' · ')
     : '';
-  // the backend remembers a purchase's category for its merchant
-  const note =
-    t && t.mcc !== null && t.amount < 0 ? `Наступні покупки в «${t.description}» теж підуть у цю категорію` : undefined;
+  // a merchant the backend remembers can be moved as a whole
+  const mappingId = t?.source !== 'manual' ? (t?.merchant_mapping_id ?? undefined) : undefined;
+  const merchant = scope === 'merchant' && mappingId !== undefined;
+  // changed by hand ones keep theirs, that's the backend's rule
+  const note = t && merchant ? `Для всіх транзакцій «${t.description}»` : undefined;
 
   return (
     <CategoryPicker
       title="Змінити категорію"
       subtitle={subtitle}
+      controls={
+        mappingId !== undefined ? (
+          <Segmented
+            options={[
+              { key: 'one', label: 'Тільки ця' },
+              { key: 'merchant', label: 'Усі такі' },
+            ]}
+            value={scope}
+            onChange={setScope}
+          />
+        ) : null
+      }
       note={note}
       selectedId={t?.category?.id ?? null}
-      kinds={t && t.amount < 0 ? OUTGOING_KINDS : undefined}
-      busyId={change.isPending ? change.variables.id : undefined}
+      kinds={t ? kindsFor(t) : undefined}
+      busyId={change.isPending ? change.variables.category.id : undefined}
       onPick={(category) => {
-        if (!category || category.id === t?.category?.id) {
+        if (!t || !category) {
           close();
           return;
         }
-        change.mutate(category, {
-          onSuccess: close,
-          onError: (error) =>
-            Alert.alert(
-              'Не вдалося змінити категорію',
-              error instanceof ApiError && error.status === 400
-                ? 'Ця категорія не підходить для цієї транзакції'
-                : 'Перевір інтернет і спробуй ще раз',
-            ),
-        });
+        // the same category again still counts when it confirms an unsure
+        // guess or goes to the whole merchant
+        if (category.id === t.category?.id && !merchant && !isUnsure(t)) {
+          close();
+          return;
+        }
+        change.mutate(
+          { category, mappingId: merchant ? mappingId : undefined },
+          {
+            onSuccess: close,
+            onError: (error) =>
+              Alert.alert(
+                'Не вдалося змінити категорію',
+                error instanceof ApiError && error.status === 400
+                  ? 'Ця категорія не підходить для цієї транзакції'
+                  : 'Перевір інтернет і спробуй ще раз',
+              ),
+          },
+        );
       }}
     />
   );

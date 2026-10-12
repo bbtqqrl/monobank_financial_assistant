@@ -4,6 +4,7 @@ import type { CategoryLook } from '@/lib/categories';
 import { formatMoney } from '@/lib/money';
 import { useTheme } from '@/theme';
 import { CategoryChip } from '@/ui/CategoryChip';
+import { Icon } from '@/ui/icons/Icon';
 import { Text } from '@/ui/Text';
 
 type Props = {
@@ -11,6 +12,8 @@ type Props = {
   title: string;
   // category name
   caption: string;
+  // the category is an unsure guess or missing: marked so it gets a look
+  unsure?: boolean;
   // minor units, negative = spent
   amount: number;
   currency: number;
@@ -24,7 +27,7 @@ type Props = {
 };
 
 // Transaction row: category chip · merchant and category · amount and time
-export function TxRow({ look, title, caption, amount, currency, when, original, compact = false, onPress }: Props) {
+export function TxRow({ look, title, caption, unsure = false, amount, currency, when, original, compact = false, onPress }: Props) {
   const { c } = useTheme();
   const income = amount > 0;
   const sub = original ? `${formatMoney(original.amount, original.currency, { sign: 'never' })} · ${when}` : when;
@@ -40,9 +43,18 @@ export function TxRow({ look, title, caption, amount, currency, when, original, 
         <Text variant="rowTitle" numberOfLines={1}>
           {title}
         </Text>
-        <Text variant="rowCaption" tone="faint" numberOfLines={1}>
-          {caption}
-        </Text>
+        <View style={styles.caption}>
+          {unsure ? <Icon name="sparkle" size={11} color={c.warning} weight={2.2} /> : null}
+          <Text
+            variant="rowCaption"
+            tone="faint"
+            numberOfLines={1}
+            accessibilityLabel={unsure ? `${caption}, варто перевірити` : undefined}
+            style={styles.captionText}
+          >
+            {caption}
+          </Text>
+        </View>
       </View>
       <View style={styles.right}>
         <Text variant="rowAmount" style={income && { color: c.category.green }}>
@@ -62,6 +74,8 @@ const styles = StyleSheet.create({
   regular: { paddingVertical: 10 },
   pressed: { opacity: 0.6 },
   middle: { flex: 1, gap: 2 },
+  caption: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  captionText: { flexShrink: 1 },
   right: { alignItems: 'flex-end', gap: 2 },
   when: { fontSize: 11.5 },
 });

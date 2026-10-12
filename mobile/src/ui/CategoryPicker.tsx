@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,6 +13,8 @@ import { Text } from '@/ui/Text';
 type Props = {
   title: string;
   subtitle: string;
+  // under the header, e.g. a switch for what the choice applies to
+  controls?: ReactNode;
   // a line under the search, e.g. what else the choice changes
   note?: string;
   selectedId: number | null;
@@ -42,7 +44,7 @@ const look = (c: CategoryBrief) => categoryLook(c.slug, c.kind === 'income' ? 1 
 // Searchable category tree for a sheet. The iOS sheet sizes its scroll view
 // itself and expects exactly two children: a header that keeps its own native
 // view, and the list.
-export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, kinds, busyId, onPick }: Props) {
+export function CategoryPicker({ title, subtitle, controls, note, selectedId, allLabel, kinds, busyId, onPick }: Props) {
   const insets = useSafeAreaInsets();
   const categories = useCategories();
   const [query, setQuery] = useState('');
@@ -74,6 +76,7 @@ export function CategoryPicker({ title, subtitle, note, selectedId, allLabel, ki
     <>
       <View collapsable={false} style={styles.top}>
         <SheetHeader title={title} subtitle={subtitle} />
+        {controls}
         <View style={styles.search}>
           <SearchField value={query} onChangeText={setQuery} placeholder="Пошук категорії" returnKeyType="done" />
         </View>
