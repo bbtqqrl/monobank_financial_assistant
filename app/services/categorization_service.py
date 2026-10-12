@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
 from app.db.models.mcc_codes import MccCode
-from app.db.models.user import User
 from app.repositories.account import AccountRepository
 from app.repositories.category import CategoryRepository
 from app.repositories.jar import JarRepository
@@ -27,6 +26,12 @@ OUTGOING_KINDS = ("expense", "transfer", "unknown")
 PAIR_JAR_SLUG = "zaoshchadzhennia"
 PAIR_EXCHANGE_SLUG = "obmin-valiut"
 PAIR_OWN_ACCOUNTS_SLUG = "mizh-svoimy-rakhunkamy"
+
+PERSON_TRANSFER_MCC = {4829, 6012}
+PERSON_IN_SLUG = "perekazy-vid-liudei"
+PERSON_OUT_SLUG = "perekazy-liudiam"
+_NAME_WORD = re.compile(r"[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’]+(?:-[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’]+)?")
+_SHORT_NAME = re.compile(r"[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’-]+ [A-ZА-ЯІЇЄҐ]\.")
 
 
 class CategorizationAIError(Exception):
@@ -62,11 +67,20 @@ def _mapping_fits_direction(kind: str, amount: int) -> bool:
     return True
 
 
-def _names_holder(holder_name: str, *texts: str | None) -> bool:
-    words = {word for word in holder_name.lower().split() if len(word) > 2}
-    if not words:
-        return False
-    return any(text and words <= set(re.findall(r"\w+", text.lower())) for text in texts)
+def _is_person_name(text: str) -> bool:
+    words = text.split()
+    return 2 <= len(words) <= 3 and all(_NAME_WORD.fullmatch(word) for word in words)
+
+
+def _person_transfer_slug(transaction) -> str | None:
+    if transaction.mcc not in PERSON_TRANSFER_MCC:
+        return None
+    description = transaction.description.strip()
+    if transaction.amount > 0 and description.startswith("Від: ") and _is_person_name(description[5:]):
+        return PERSON_IN_SLUG
+    if transaction.amount < 0 and _SHORT_NAME.fullmatch(description):
+        return PERSON_OUT_SLUG
+    return None
 
 
 class CategorizationService:
@@ -123,6 +137,9 @@ class CategorizationService:
                     transaction.id, mapping.category_id,
                 )
                 return
+
+        if await self._categorize_person_transfer(transaction, merchant_key):
+            return
 
         selectable = await self.categories.get_selectable_categories(
             kinds=OUTGOING_KINDS if transaction.amount < 0 else None,
@@ -195,19 +212,6 @@ class CategorizationService:
         accounts, which decides transfer vs income/expense."""
         hints: list[str] = []
 
-        user = await self.db.get(User, transaction.user_id)
-        if user is not None and user.mono_name:
-            hints.append(f"Account holder (the user) name: {user.mono_name}.")
-            if _names_holder(user.mono_name, transaction.description, transaction.counter_name):
-                hints.append(
-                    "The counterparty is the account holder themself: the money moves from or to "
-                    "their own account in another bank, so its source is unknown."
-                )
-
-        own_jars = [j.title for j in await self.jars.list_for_user(transaction.user_id) if j.is_active]
-        if own_jars:
-            hints.append("User's own jars: " + ", ".join(f"«{title}»" for title in own_jars) + ".")
-
         if transaction.jar_id is not None:
             jar = await self.jars.get_by_id_for_user(transaction.jar_id, transaction.user_id)
             title = f" «{jar.title}»" if jar else ""
@@ -229,6 +233,29 @@ class CategorizationService:
             return None
         result = await self.db.execute(select(MccCode.name).where(MccCode.code == mcc))
         return result.scalar_one_or_none()
+
+    async def _categorize_person_transfer(self, transaction, merchant_key: str) -> bool:
+        slug = _person_transfer_slug(transaction)
+        if slug is None:
+            return False
+        category = await self.categories.get_by_slug(slug)
+        if category is None:
+            logger.error("Person transfer category slug=%s is missing, transaction id=%s goes to AI", slug, transaction.id)
+            return False
+
+        mapping = await self.mappings.upsert(
+            user_id=transaction.user_id,
+            merchant_key=merchant_key,
+            mcc=transaction.mcc,
+            category_id=category.id,
+            source="rule",
+        )
+        self.transactions.set_category(
+            transaction, category_id=category.id, source="rule", merchant_mapping_id=mapping.id,
+        )
+        await self.db.commit()
+        logger.info("Person transfer categorized by rule id=%s category=%s", transaction.id, category.slug)
+        return True
 
     async def _categorize_pair(self, transaction) -> bool:
         other = await self.transactions.get_by_id(transaction.transfer_pair_id)

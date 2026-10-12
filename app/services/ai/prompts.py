@@ -31,17 +31,6 @@ Rules:
   movements are transfers.
 - Money sent to or received from another private person is an expense or
   income respectively, unless hints say the counterparty is the user.
-- Only when the hints give the account holder's name and the counterparty or
-  description names that same person (any spelling, word order or
-  transliteration, with or without patronymic), the money comes from the
-  user's own account in another bank. It may be salary, business income or
-  the user's own savings: choose the income category for money from other
-  banks, with confidence of at most 0.5. It is not a transfer from another
-  person.
-  Without such a hint, or for any other name, the person is someone else.
-- A top-up of, or withdrawal from, one of the user's own jars listed in the
-  hints is a transfer to or from savings. A jar that is not in that list
-  belongs to someone else.
 - Cash put in through a terminal (a bank's own terminal such as "Термінал mono"
   or "Термінал А-Банку", or a payment terminal network such as City24, iBox or
   EasyPay) has an unknown source (see the rule below). The cash category is
