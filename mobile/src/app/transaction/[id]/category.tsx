@@ -47,7 +47,7 @@ export default function ChangeCategorySheet() {
 
   return (
     <CategoryPicker
-      title={merchant ? 'Змінити для всіх' : 'Змінити категорію'}
+      title={merchant ? 'Усі покупки мерчанта' : 'Змінити категорію'}
       subtitle={subtitle}
       note={note}
       selectedId={t?.category?.id ?? null}
