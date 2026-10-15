@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.budget import Budget
@@ -60,22 +60,30 @@ class BudgetRepository:
     ) -> dict[int, int]:
         """Net spending (as positive kopecks) per category within
         [from_ts, to_ts). Refunds - positive amounts in an expense category -
-        offset it; a month with more refunds than spending reports 0."""
+        offset it; a month with more refunds than spending reports 0. A parent
+        category also counts its children's spending."""
         if not category_ids:
             return {}
 
         result = await self.db.execute(
-            select(TransactionRaw.category_id, func.sum(-TransactionRaw.amount_uah))
+            select(TransactionRaw.category_id, Category.parent_id, func.sum(-TransactionRaw.amount_uah))
+            .join(Category, Category.id == TransactionRaw.category_id)
             .where(
                 TransactionRaw.user_id == user_id,
-                TransactionRaw.category_id.in_(category_ids),
+                or_(TransactionRaw.category_id.in_(category_ids), Category.parent_id.in_(category_ids)),
                 TransactionRaw.amount_uah.is_not(None),
                 TransactionRaw.time >= from_ts,
                 TransactionRaw.time < to_ts,
             )
-            .group_by(TransactionRaw.category_id)
+            .group_by(TransactionRaw.category_id, Category.parent_id)
         )
-        return {category_id: max(int(total), 0) for category_id, total in result.all()}
+
+        totals: dict[int, int] = {}
+        for category_id, parent_id, total in result.all():
+            for budget_category_id in (category_id, parent_id):
+                if budget_category_id in category_ids:
+                    totals[budget_category_id] = totals.get(budget_category_id, 0) + int(total)
+        return {category_id: max(total, 0) for category_id, total in totals.items()}
 
     @staticmethod
     def update_amount(budget: Budget, amount: int) -> None:
