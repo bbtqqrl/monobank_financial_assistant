@@ -18,14 +18,15 @@ class RefreshTokenRepository:
         await self.db.flush()
         return record
 
-    async def get_valid_by_hash(self, token_hash: str) -> Optional[RefreshToken]:
-        result = await self.db.execute(
-            select(RefreshToken).where(
-                RefreshToken.token_hash == token_hash,
-                RefreshToken.revoked_at.is_(None),
-                RefreshToken.expires_at > datetime.now(timezone.utc),
-            )
+    async def get_valid_by_hash(self, token_hash: str, for_update: bool = False) -> Optional[RefreshToken]:
+        query = select(RefreshToken).where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(timezone.utc),
         )
+        if for_update:
+            query = query.with_for_update()
+        result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
     async def revoke(self, token: RefreshToken) -> None:

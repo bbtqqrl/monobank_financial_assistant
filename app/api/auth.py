@@ -34,7 +34,7 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     login_ip_limiter.hit(client_ip(request))
-    login_email_limiter.hit(data.email.lower())
+    login_email_limiter.hit(data.email)
     service = AuthService(db)
 
     try:
