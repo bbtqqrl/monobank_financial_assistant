@@ -2,14 +2,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { accountLabel, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
+import { accountName, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
 import { REFRESH_FLASH, refreshAccounts } from '@/api/monobank';
-import { useMonthSpend, useTransactions } from '@/api/transactions';
+import { useTransactions } from '@/api/transactions';
 import { cardOrder, hiddenCards } from '@/lib/cardOrder';
 import { thud } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
-import { monthLabel, whenLabel } from '@/lib/time';
+import { whenLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
+import { useExpandTabBarOnFocus } from '@/lib/tabBar';
 import { usePullRefresh } from '@/lib/usePullRefresh';
 import { BalanceCard } from '@/ui/BalanceCard';
 import { BalanceCarousel } from '@/ui/BalanceCarousel';
@@ -25,9 +26,8 @@ const openCards = () => {
 
 export default function OverviewScreen() {
   const qc = useQueryClient();
+  useExpandTabBarOnFocus();
   const accounts = useAccounts();
-  const spend = useMonthSpend();
-  const month = monthLabel();
   const order = cardOrder.useValue();
   const hidden = hiddenCards.useValue();
   const all = sortedAccounts(accounts.data ?? [], order);
@@ -35,18 +35,20 @@ export default function OverviewScreen() {
   // with every card hidden (e.g. the last shown one was closed) the screen
   // would read as "not connected", so then they all show
   const shown = visible.length > 0 ? visible : all;
-  const cards = shown.map((a) => {
-    const spent = spend.data?.get(a.id);
-    return {
-      key: a.id,
-      label: a.masked_pan ? 'Баланс картки' : 'Баланс рахунку',
-      balance: ownBalance(a),
-      currency: a.currency_code,
-      account: accountLabel(a),
-      cardType: a.account_type,
-      spent: spent ? `${formatMoney(spent, a.currency_code, { cents: false })} за ${month}` : undefined,
-    };
-  });
+  const cards = shown.map((a) => ({
+    key: a.id,
+    label: a.masked_pan ? 'Баланс картки' : 'Баланс рахунку',
+    balance: ownBalance(a),
+    currency: a.currency_code,
+    account: accountName(a),
+    pan: a.masked_pan?.slice(-4),
+    cardType: a.account_type,
+    // the big number is own money; the bank's money on top of it only where there is some
+    detail:
+      a.credit_limit > 0
+        ? { label: 'Кредитний ліміт', value: formatMoney(a.credit_limit, a.currency_code, { cents: false }) }
+        : undefined,
+  }));
 
   const recent = useTransactions({ limit: 5 });
   const currencies = useAccountCurrencies();
@@ -54,7 +56,7 @@ export default function OverviewScreen() {
 
   const pull = usePullRefresh(async () => {
     // refetch() doesn't throw, it leaves the error in the query
-    const [balances] = await Promise.all([refreshAccounts(qc), spend.refetch(), recent.refetch()]);
+    const [balances] = await Promise.all([refreshAccounts(qc), recent.refetch()]);
     return REFRESH_FLASH[balances];
   });
 

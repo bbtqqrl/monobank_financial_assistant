@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -9,6 +9,8 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
+import { balanceHidden, setBalanceHidden } from '@/lib/cardOrder';
+import { tap } from '@/lib/haptics';
 import { useTheme } from '@/theme';
 import { BalanceCard } from '@/ui/BalanceCard';
 
@@ -18,8 +20,9 @@ export type BalanceCardData = {
   balance: number;
   currency: number;
   account: string;
+  pan?: string;
   cardType?: string;
-  spent?: string;
+  detail?: { label: string; value: string };
 };
 
 const SIDE = 20;
@@ -32,8 +35,7 @@ const SHADOW = 48;
 // the screen edge; dots below follow the finger.
 export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData[]; onLongPress?: () => void }) {
   const { width } = useWindowDimensions();
-  // TODO: remember between launches once settings are stored
-  const [hidden, setHidden] = useState(false);
+  const hidden = balanceHidden.useValue();
   const progress = useSharedValue(0);
   const cardWidth = width - SIDE * 2;
   const step = cardWidth + GAP;
@@ -42,7 +44,11 @@ export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData
     progress.set(e.contentOffset.x / step);
   });
 
-  const toggle = () => setHidden((h) => !h);
+  // one switch for every card, remembered between launches
+  const toggle = () => {
+    tap();
+    setBalanceHidden(!hidden);
+  };
 
   if (cards.length < 2) {
     const { key: _key, ...card } = cards[0] ?? { key: 0 };

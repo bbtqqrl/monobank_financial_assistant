@@ -1,6 +1,7 @@
 import { Fragment, type ComponentProps } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { Glass } from '@/ui/Glass';
 import { Text } from '@/ui/Text';
@@ -20,6 +21,7 @@ type Props = {
 // rows on a single glass card
 export function DayGroup({ label, total, rows }: Props) {
   const { c } = useTheme();
+  const mask = useMask();
 
   return (
     <View style={styles.group}>
@@ -29,7 +31,7 @@ export function DayGroup({ label, total, rows }: Props) {
         </Text>
         {total ? (
           <Text variant="link" style={[styles.total, { color: c.category.neutral }]}>
-            {total}
+            {mask(total)}
           </Text>
         ) : null}
       </View>

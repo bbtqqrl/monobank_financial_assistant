@@ -7,15 +7,15 @@ export type Locale = 'uk' | 'pl' | 'en';
 export const UAH = 980;
 export const PLN = 985;
 
-const CURRENCIES: Record<number, { symbol: string; exponent: number }> = {
-  980: { symbol: '₴', exponent: 2 },
-  985: { symbol: 'zł', exponent: 2 },
-  840: { symbol: '$', exponent: 2 },
-  978: { symbol: '€', exponent: 2 },
-  826: { symbol: '£', exponent: 2 },
-  203: { symbol: 'Kč', exponent: 2 },
-  348: { symbol: 'Ft', exponent: 2 },
-  392: { symbol: '¥', exponent: 0 },
+const CURRENCIES: Record<number, { symbol: string; code: string; exponent: number }> = {
+  980: { symbol: '₴', code: 'UAH', exponent: 2 },
+  985: { symbol: 'zł', code: 'PLN', exponent: 2 },
+  840: { symbol: '$', code: 'USD', exponent: 2 },
+  978: { symbol: '€', code: 'EUR', exponent: 2 },
+  826: { symbol: '£', code: 'GBP', exponent: 2 },
+  203: { symbol: 'Kč', code: 'CZK', exponent: 2 },
+  348: { symbol: 'Ft', code: 'HUF', exponent: 2 },
+  392: { symbol: '¥', code: 'JPY', exponent: 0 },
 };
 
 const NBSP = ' ';
@@ -69,6 +69,11 @@ export function formatMoney(minor: number, currency: number = UAH, opts: MoneyOp
 
 export function currencySymbol(currency: number = UAH) {
   return CURRENCIES[currency]?.symbol ?? '¤';
+}
+
+// "USD"; the numeric code when it's not one we know
+export function currencyCode(currency: number = UAH) {
+  return CURRENCIES[currency]?.code ?? String(currency);
 }
 
 // What the user typed, "12,5" or "12.50", into minor units, without floats.

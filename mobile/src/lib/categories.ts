@@ -28,6 +28,7 @@ const LOOKS: [CategoryLook, string[]][] = [
   [{ icon: 'list', color: 'slate' }, ['profesiini-servisy', 'iurydychni-posluhy', 'bukhhalterski-posluhy', 'derzhavni-posluhy', 'poshta-ta-dostavka', 'druk-ta-kopiiuvannia', 'marketynh-ta-reklama']],
   [{ icon: 'card', color: 'dim' }, ['finansy', 'komisii-ta-zbory', 'strakhuvannia', 'podatky']],
   [{ icon: 'sparkle', color: 'rose' }, ['podarunky-ta-blahodiinist', 'podarunky', 'blahodiinist']],
+  [{ icon: 'cart', color: 'blue' }, ['marketpleisy']],
   [{ icon: 'person', color: 'blue' }, ['perekazy-liudiam']],
   [{ icon: 'card', color: 'neutral' }, ['inshi-vytraty', 'nevidome']],
   // income
@@ -38,8 +39,9 @@ const LOOKS: [CategoryLook, string[]][] = [
   [{ icon: 'person', color: 'green' }, ['perekazy-vid-liudei']],
   [{ icon: 'star', color: 'green' }, ['keshbek']],
   [{ icon: 'chart', color: 'green' }, ['vidsotky-ta-dyvidendy']],
+  [{ icon: 'card', color: 'green' }, ['popovnennia-rakhunku']],
   // the user's own money moving
-  [{ icon: 'transfer', color: 'slate' }, ['rukh-koshtiv', 'mizh-svoimy-rakhunkamy', 'popovnennia-rakhunku']],
+  [{ icon: 'transfer', color: 'slate' }, ['rukh-koshtiv', 'mizh-svoimy-rakhunkamy']],
   [{ icon: 'refresh', color: 'teal' }, ['obmin-valiut']],
   [{ icon: 'jar', color: 'teal' }, ['zaoshchadzhennia', 'investytsii']],
   [{ icon: 'card', color: 'dim' }, ['hroshovi-zniattia', 'kredyty', 'pohashennia-kredytu']],

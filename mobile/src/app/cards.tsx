@@ -7,6 +7,7 @@ import { cardOrder, hiddenCards, resetCards, saveCardOrder, setCardHidden } from
 import { FONT } from '@/lib/fonts';
 import { formatMoney } from '@/lib/money';
 import { tap } from '@/lib/haptics';
+import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { Button } from '@/ui/Button';
 import { CardArt } from '@/ui/CardArt';
@@ -22,6 +23,7 @@ const idOf = (a: Account) => a.id;
 
 function CardRow({ account, hidden, canHide }: { account: Account; hidden: boolean; canHide: boolean }) {
   const { c } = useTheme();
+  const mask = useMask();
   const pan = account.masked_pan?.slice(-4);
   // the last card shown can't go, the Overview would be left empty
   const locked = !hidden && !canHide;
@@ -39,7 +41,7 @@ function CardRow({ account, hidden, canHide }: { account: Account; hidden: boole
             </Text>
           ) : null}
         </View>
-        <Text style={styles.balance}>{formatMoney(ownBalance(account), account.currency_code, { cents: false })}</Text>
+        <Text style={styles.balance}>{mask(formatMoney(ownBalance(account), account.currency_code, { cents: false }))}</Text>
       </View>
       <Pressable
         accessibilityRole="switch"
