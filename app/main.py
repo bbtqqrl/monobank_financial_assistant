@@ -1,7 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from asyncpg.exceptions import DataError as AsyncpgDataError
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 import uvicorn
 import logging
 
@@ -44,6 +47,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(DBAPIError)
+async def query_argument_error(request: Request, exc: DBAPIError):
+    # A value the driver can't even encode for its column - e.g. an id past
+    # int32 in a path or query param - is bad input, not a server error.
+    cause = exc.orig.__cause__ if exc.orig is not None else None
+    if isinstance(cause, AsyncpgDataError) and str(cause).startswith("invalid input for query argument"):
+        return JSONResponse(status_code=422, content={"detail": "Invalid input value"})
+    raise exc
 
 app.include_router(auth_router)
 app.include_router(webhook_router)

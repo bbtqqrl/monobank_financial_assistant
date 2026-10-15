@@ -15,6 +15,10 @@ SERVER_KEY_URL = "https://api.monobank.ua/bank/sync"
 KEY_FETCH_RETRIES = 3
 KEY_FETCH_RETRY_DELAY_SECONDS = 1
 KEY_MAX_AGE_SECONDS = 12 * 60 * 60
+# The key id comes from the request, so anyone can claim an unknown one.
+# Without a floor every such request would hit /bank/sync, and Monobank
+# rate-limiting us would leave the key unrefreshable for real webhooks.
+KEY_REFRESH_MIN_INTERVAL_SECONDS = 60
 
 
 class MonobankSignatureVerifier:
@@ -36,6 +40,8 @@ class MonobankSignatureVerifier:
         self._public_key: ec.EllipticCurvePublicKey | None = None
         self._key_id: str | None = None
         self._fetched_at: float = 0.0
+        self._refresh_attempted_at: float | None = None
+        self._refresh_lock = asyncio.Lock()
 
     async def verify(self, body: bytes, x_sign_b64: str, x_key_id: str | None) -> bool:
         if not x_sign_b64:
@@ -51,11 +57,12 @@ class MonobankSignatureVerifier:
             logger.warning("Webhook signature check: X-Sign header is not valid base64: %r", x_sign_b64)
             return False
 
-        needs_refresh = self._public_key is None or (x_key_id and x_key_id != self._key_id)
-        is_stale = time.monotonic() - self._fetched_at > KEY_MAX_AGE_SECONDS
-
-        if needs_refresh or is_stale:
-            await self._refresh_key(required=self._public_key is None)
+        if self._should_refresh(x_key_id):
+            async with self._refresh_lock:
+                # Concurrent requests queue here; only the first one fetches.
+                if self._should_refresh(x_key_id):
+                    self._refresh_attempted_at = time.monotonic()
+                    await self._refresh_key(required=self._public_key is None)
 
         if self._public_key is None:
             logger.warning("Webhook signature check: no server public key available, cannot verify")
@@ -67,6 +74,14 @@ class MonobankSignatureVerifier:
             x_key_id, self._key_id, len(signature), signature[:8].hex(), len(body), result,
         )
         return result
+
+    def _should_refresh(self, x_key_id: str | None) -> bool:
+        now = time.monotonic()
+        if self._refresh_attempted_at is not None and now - self._refresh_attempted_at < KEY_REFRESH_MIN_INTERVAL_SECONDS:
+            return False
+        needs_refresh = self._public_key is None or (x_key_id and x_key_id != self._key_id)
+        is_stale = now - self._fetched_at > KEY_MAX_AGE_SECONDS
+        return bool(needs_refresh or is_stale)
 
     async def _refresh_key(self, required: bool) -> None:
         for attempt in range(1, KEY_FETCH_RETRIES + 1):

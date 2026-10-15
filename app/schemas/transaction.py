@@ -1,5 +1,11 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+# 1 billion in minor units either way - far past any real transaction, well
+# inside BigInteger even after currency conversion.
+MAX_ABS_AMOUNT = 100_000_000_000
+# 2100-01-01 UTC.
+MAX_TIME = 4_102_444_800
+
 
 class CategoryBrief(BaseModel):
     id: int
@@ -50,9 +56,14 @@ class UpdateTransactionCategoryRequest(BaseModel):
 
 class CreateTransactionRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
-    amount: int = Field(description="In minor units (kopecks). Negative = expense, positive = income.")
+    amount: int = Field(
+        ge=-MAX_ABS_AMOUNT, le=MAX_ABS_AMOUNT,
+        description="In minor units (kopecks). Negative = expense, positive = income.",
+    )
     currency_code: int | None = Field(
         default=None,
+        ge=1,
+        le=999,
         description="ISO 4217 numeric. Taken from the account or jar when one is given; defaults to 980 (UAH) otherwise.",
     )
     # Required: a manual transaction is never seen by the AI or the sweeper,
@@ -60,13 +71,16 @@ class CreateTransactionRequest(BaseModel):
     category_id: int
     account_id: int | None = None
     jar_id: int | None = None
-    time: int | None = Field(default=None, description="Unix seconds; defaults to now if omitted")
+    time: int | None = Field(default=None, ge=0, le=MAX_TIME, description="Unix seconds; defaults to now if omitted")
     comment: str | None = Field(default=None, max_length=500)
 
 
 class UpdateManualTransactionRequest(BaseModel):
     description: str | None = Field(default=None, min_length=1, max_length=500)
-    amount: int | None = Field(default=None, description="In minor units (kopecks). Negative = expense, positive = income.")
+    amount: int | None = Field(
+        default=None, ge=-MAX_ABS_AMOUNT, le=MAX_ABS_AMOUNT,
+        description="In minor units (kopecks). Negative = expense, positive = income.",
+    )
     category_id: int | None = None
-    time: int | None = None
+    time: int | None = Field(default=None, ge=0, le=MAX_TIME)
     comment: str | None = Field(default=None, max_length=500)

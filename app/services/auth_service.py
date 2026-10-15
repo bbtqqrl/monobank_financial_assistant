@@ -65,7 +65,9 @@ class AuthService:
 
     async def refresh(self, raw_refresh_token: str) -> tuple[str, str]:
         token_hash = hash_refresh_token(raw_refresh_token)
-        stored = await self.refresh_tokens.get_valid_by_hash(token_hash)
+        # Row lock: a second refresh with the same token waits here, then finds
+        # it revoked - otherwise both would get a fresh pair.
+        stored = await self.refresh_tokens.get_valid_by_hash(token_hash, for_update=True)
         if stored is None:
             raise InvalidRefreshTokenError()
 
