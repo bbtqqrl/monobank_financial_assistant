@@ -6,6 +6,7 @@ import { accountName, ownBalance, type Account } from '@/api/accounts';
 import { FONT } from '@/lib/fonts';
 import { tap } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
+import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { CardArt } from '@/ui/CardArt';
 import { Glass } from '@/ui/Glass';
@@ -33,6 +34,7 @@ function Tile({ selected, label, onPress, art, pan, name, sub }: {
 }) {
   const { c } = useTheme();
   const ring = useSelectRing(selected);
+  const mask = useMask();
   return (
     <Pressable
       accessibilityRole="radio"
@@ -61,7 +63,7 @@ function Tile({ selected, label, onPress, art, pan, name, sub }: {
               {name}
             </Text>
             <Text style={styles.sub} numberOfLines={1}>
-              {sub}
+              {mask(sub)}
             </Text>
           </View>
         </Glass>

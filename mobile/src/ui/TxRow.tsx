@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { CategoryLook } from '@/lib/categories';
 import { formatMoney } from '@/lib/money';
+import { useMask } from '@/lib/privacy';
 import { useTheme } from '@/theme';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Icon } from '@/ui/icons/Icon';
@@ -29,8 +30,9 @@ type Props = {
 // Transaction row: category chip · merchant and category · amount and time
 export function TxRow({ look, title, caption, unsure = false, amount, currency, when, original, compact = false, onPress }: Props) {
   const { c } = useTheme();
+  const mask = useMask();
   const income = amount > 0;
-  const sub = original ? `${formatMoney(original.amount, original.currency, { sign: 'never' })} · ${when}` : when;
+  const sub = original ? `${mask(formatMoney(original.amount, original.currency, { sign: 'never' }))} · ${when}` : when;
 
   return (
     <Pressable
@@ -58,7 +60,7 @@ export function TxRow({ look, title, caption, unsure = false, amount, currency, 
       </View>
       <View style={styles.right}>
         <Text variant="rowAmount" style={income && { color: c.category.green }}>
-          {formatMoney(amount, currency, { sign: income ? 'always' : 'auto' })}
+          {mask(formatMoney(amount, currency, { sign: income ? 'always' : 'auto' }))}
         </Text>
         <Text variant="rowCaption" tone="faint" style={styles.when}>
           {sub}

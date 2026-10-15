@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { FONT } from '@/lib/fonts';
+import { tabBarMinimizes } from '@/lib/tabBar';
 import { useTheme } from '@/theme';
 import { TAB_ICONS } from '@/ui/tabIcons';
 
@@ -14,12 +15,13 @@ export default function TabsLayout() {
   const { c, dark } = useTheme();
   const icons = dark ? TAB_ICONS.dark : TAB_ICONS.light;
   const label = { fontFamily: FONT.ui.semiBold, fontSize: 10 };
+  const minimizes = tabBarMinimizes.useValue();
 
   return (
     <NativeTabs
       tintColor={c.ink}
       labelStyle={{ default: { ...label, color: c.ghost }, selected: { ...label, color: c.ink } }}
-      minimizeBehavior="onScrollDown"
+      minimizeBehavior={minimizes ? 'onScrollDown' : 'never'}
     >
       <NativeTabs.Trigger name="(overview)">
         <NativeTabs.Trigger.Label>Огляд</NativeTabs.Trigger.Label>

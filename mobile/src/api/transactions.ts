@@ -146,7 +146,7 @@ export function useTransaction(id: number) {
 }
 
 // lists and sums a new or re-categorised transaction can show up in
-const AFFECTED = new Set(['transactions', 'tx-all', 'month-spend', 'tx-active-months', 'tx-oldest']);
+const AFFECTED = new Set(['transactions', 'tx-all', 'tx-active-months', 'tx-oldest']);
 
 const refreshLists = (qc: QueryClient) =>
   qc.invalidateQueries({ predicate: (q) => AFFECTED.has(String(q.queryKey[0])) });
@@ -257,32 +257,10 @@ export function foreignPart(t: Transaction, accountCurrency: Map<number, number>
 }
 
 
-export function useMonthSpend() {
-  const now = new Date();
-  const filters: TxFilters = { type: 'expense', from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)) };
-  return useQuery({
-    queryKey: ['month-spend', filters.from],
-    queryFn: async () => {
-      const spent = new Map<number, number>();
-      const seen = new Set<number>();
-      for (let page = 1; ; page++) {
-        const p = await api(PageSchema, listUrl(filters, 100, page));
-        for (const t of p.items) {
-          // a move between own accounts isn't spending, whatever its category
-          if (t.account_id === null || t.transfer_pair_id !== null || seen.has(t.id) || !inRange(t, filters)) continue;
-          seen.add(t.id);
-          spent.set(t.account_id, (spent.get(t.account_id) ?? 0) - t.amount);
-        }
-        if (page * p.limit >= p.total) return spent;
-      }
-    },
-  });
-}
-
 const MAX_SUM_PAGES = 20;
 
 // Every transaction matching the filters, for period sums under the list.
-// Kept out of the 'transactions' key like the month spend. Stops at 2000.
+// Kept out of the 'transactions' key. Stops at 2000.
 export function useAllTransactions(filters: TxFilters, enabled = true) {
   return useQuery({
     queryKey: ['tx-all', filters],

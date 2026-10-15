@@ -12,6 +12,7 @@ import type { Flow } from '@/lib/flow';
 import { FONT } from '@/lib/fonts';
 import { formatMoney, UAH } from '@/lib/money';
 import { isoDate } from '@/lib/period';
+import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { Glass } from '@/ui/Glass';
 import { Icon, type IconName } from '@/ui/icons/Icon';
@@ -121,6 +122,7 @@ function Stat({ icon, label, tint, value, income = false }: {
   value: number | undefined;
   income?: boolean;
 }) {
+  const mask = useMask();
   return (
     <View style={styles.stat}>
       <View style={[styles.statIcon, { backgroundColor: withAlpha(tint, 0.14) }]}>
@@ -134,7 +136,7 @@ function Stat({ icon, label, tint, value, income = false }: {
           <View style={[styles.skeleton, { backgroundColor: withAlpha(tint, 0.12) }]} />
         ) : (
           <Text variant="rowAmount" numberOfLines={1} style={[styles.statValue, income && value > 0 && { color: tint }]}>
-            {formatMoney(value, UAH, { cents: false, sign: income && value > 0 ? 'always' : 'auto' })}
+            {mask(formatMoney(value, UAH, { cents: false, sign: income && value > 0 ? 'always' : 'auto' }))}
           </Text>
         )}
       </View>

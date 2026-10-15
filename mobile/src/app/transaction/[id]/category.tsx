@@ -1,5 +1,4 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
 import { Alert } from 'react-native';
 
 import { useAccountCurrencies } from '@/api/accounts';
@@ -8,10 +7,8 @@ import { ApiError } from '@/api/client';
 import { isUncategorized, isUnsure, txCurrency, useSetCategory, useTransaction, type Transaction } from '@/api/transactions';
 import { formatMoney } from '@/lib/money';
 import { dayLabel } from '@/lib/time';
+import { useMask } from '@/lib/privacy';
 import { CategoryPicker } from '@/ui/CategoryPicker';
-import { Segmented } from '@/ui/Segmented';
-
-type Scope = 'one' | 'merchant';
 
 // Categories that fit the money's direction. Going out it's never income (the
 // backend turns that down). Coming in it's income, unless it may be a refund:
@@ -24,11 +21,12 @@ function kindsFor(t: Transaction): readonly CategoryKind[] {
 
 // Change category sheet over the transaction details (Figma: ChangeCategory)
 export default function ChangeCategorySheet() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // scope=merchant: the merchant's other purchases move too
+  const { id, scope } = useLocalSearchParams<{ id: string; scope?: string }>();
+  const mask = useMask();
   const tx = useTransaction(Number(id));
   const currencies = useAccountCurrencies();
   const change = useSetCategory(Number(id));
-  const [scope, setScope] = useState<Scope>('one');
   const t = tx.data;
 
   const close = () => {
@@ -37,7 +35,7 @@ export default function ChangeCategorySheet() {
   };
 
   const subtitle = t
-    ? [t.description, currencies && formatMoney(t.amount, txCurrency(t, currencies)), dayLabel(t.time)]
+    ? [t.description, currencies && mask(formatMoney(t.amount, txCurrency(t, currencies))), dayLabel(t.time)]
         .filter(Boolean)
         .join(' · ')
     : '';
@@ -49,20 +47,8 @@ export default function ChangeCategorySheet() {
 
   return (
     <CategoryPicker
-      title="Змінити категорію"
+      title={merchant ? 'Змінити для всіх' : 'Змінити категорію'}
       subtitle={subtitle}
-      controls={
-        mappingId !== undefined ? (
-          <Segmented
-            options={[
-              { key: 'one', label: 'Тільки ця' },
-              { key: 'merchant', label: 'Усі такі' },
-            ]}
-            value={scope}
-            onChange={setScope}
-          />
-        ) : null
-      }
       note={note}
       selectedId={t?.category?.id ?? null}
       kinds={t ? kindsFor(t) : undefined}

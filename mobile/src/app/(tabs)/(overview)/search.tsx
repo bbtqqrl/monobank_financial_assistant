@@ -12,6 +12,7 @@ import { plural } from '@/lib/plural';
 import { addRecentSearch, useRecentSearches } from '@/lib/recentSearches';
 import { useDebounced } from '@/lib/useDebounced';
 import { usePullRefresh } from '@/lib/usePullRefresh';
+import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { EmptyState } from '@/ui/EmptyState';
 import { Glass } from '@/ui/Glass';
@@ -25,6 +26,7 @@ const MIN_LENGTH = 2;
 
 export default function SearchScreen() {
   const { c } = useTheme();
+  const mask = useMask();
   const [query, setQuery] = useState('');
   const search = useDebounced(query.trim(), 350);
   const period = searchPeriod.useValue();
@@ -60,8 +62,8 @@ export default function SearchScreen() {
   const spent = uah.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
   const income = uah.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const sums = [
-    spent ? formatMoney(spent, UAH, { cents: false }) : '',
-    income ? formatMoney(income, UAH, { cents: false, sign: 'always' }) : '',
+    spent ? mask(formatMoney(spent, UAH, { cents: false })) : '',
+    income ? mask(formatMoney(income, UAH, { cents: false, sign: 'always' })) : '',
   ]
     .filter(Boolean)
     .join('  ·  ');

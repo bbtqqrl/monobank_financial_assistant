@@ -5,6 +5,7 @@ import { createStore } from '@/lib/store';
 
 const ORDER_KEY = 'cardOrder';
 const HIDDEN_KEY = 'hiddenCards';
+const BALANCE_HIDDEN_KEY = 'balanceHidden';
 
 const Ids = z.array(z.number().int());
 
@@ -13,6 +14,14 @@ export const cardOrder = createStore<readonly number[] | null>(null);
 
 // account ids left out of the Overview and the account pickers
 export const hiddenCards = createStore<readonly number[]>([]);
+
+// balances shown as dots on every card, so nobody reads them over a shoulder
+export const balanceHidden = createStore(false);
+
+export function setBalanceHidden(hidden: boolean) {
+  balanceHidden.set(hidden);
+  (hidden ? AsyncStorage.setItem(BALANCE_HIDDEN_KEY, '1') : AsyncStorage.removeItem(BALANCE_HIDDEN_KEY)).catch(() => {});
+}
 
 function save(key: string, ids: readonly number[] | null) {
   (ids?.length ? AsyncStorage.setItem(key, JSON.stringify(ids)) : AsyncStorage.removeItem(key)).catch(() => {});
@@ -47,9 +56,14 @@ async function load(key: string) {
 // read once on start, next to the theme
 export async function loadCardPrefs() {
   try {
-    const [order, hidden] = await Promise.all([load(ORDER_KEY), load(HIDDEN_KEY)]);
+    const [order, hidden, balance] = await Promise.all([
+      load(ORDER_KEY),
+      load(HIDDEN_KEY),
+      AsyncStorage.getItem(BALANCE_HIDDEN_KEY),
+    ]);
     if (order) cardOrder.set(order);
     if (hidden) hiddenCards.set(hidden);
+    if (balance) balanceHidden.set(true);
   } catch {
     // nothing saved that can be read: the bank's order, all cards shown
   }
