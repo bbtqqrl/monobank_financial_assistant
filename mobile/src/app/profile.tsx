@@ -5,7 +5,6 @@ import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { signOut } from '@/api/auth';
 import { goBack } from '@/lib/nav';
 import { useTheme } from '@/theme';
-import { pickTheme } from '@/theme/pickTheme';
 import { THEME_LABELS, useThemePref } from '@/theme/preference';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
@@ -31,7 +30,7 @@ export default function ProfileScreen() {
 
       {/* Figma: 4 16 4 16 */}
       <Glass contentStyle={styles.settings}>
-        <SettingRow icon="sun" label="Тема" value={THEME_LABELS[theme]} onPress={() => pickTheme(theme)} />
+        <SettingRow icon="sun" label="Тема" value={THEME_LABELS[theme]} onPress={() => router.push('/theme')} />
         <SettingRow icon="card" label="Картки" value="Порядок" onPress={() => router.push('/cards')} />
       </Glass>
 

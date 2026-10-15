@@ -19,7 +19,6 @@ export default function OverviewLayout() {
           presentation: 'formSheet',
           sheetAllowedDetents: 'fitToContents',
           sheetGrabberVisible: true,
-          sheetCornerRadius: 28,
           // let the iOS sheet material show through
           contentStyle: { backgroundColor: 'transparent' },
         }}
@@ -31,7 +30,6 @@ export default function OverviewLayout() {
           // a long list: opens tall, can be pulled up to full height
           sheetAllowedDetents: [0.75, 1],
           sheetGrabberVisible: true,
-          sheetCornerRadius: 28,
           contentStyle: { backgroundColor: 'transparent' },
         }}
       />

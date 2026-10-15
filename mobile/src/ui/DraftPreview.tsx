@@ -14,6 +14,7 @@ import type { DraftDirection } from '@/lib/draft';
 import { FONT } from '@/lib/fonts';
 import { currencySymbol } from '@/lib/money';
 import { useTheme, withAlpha } from '@/theme';
+import { AmountDigits } from '@/ui/AmountDigits';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
 import { Segmented } from '@/ui/Segmented';
@@ -39,13 +40,6 @@ type Props = {
 
 // what can be typed into the amount, the currency's decimals are checked later
 const AMOUNT_TYPING = /^\d{0,9}(?:[.,]\d{0,2})?$/;
-
-// "12500,5" → "12 500,5" while typing
-const groupThousands = (text: string) => {
-  const [whole = '', fraction] = text.split(/[.,]/);
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return fraction === undefined ? grouped : `${grouped},${fraction}`;
-};
 
 // The transaction being made, laid out like its details screen: chip, name,
 // amount. Name and amount are typed in place.
@@ -125,11 +119,11 @@ export function DraftPreview({
           the typing (a self-sizing input leaves caret marks behind). */}
       <View style={styles.amount}>
         <Animated.Text style={[styles.amountText, amountTone]}>{income ? '+' : '−'}</Animated.Text>
-        {amountText ? (
-          <Animated.Text style={[styles.amountText, amountTone]}>{groupThousands(amountText)}</Animated.Text>
-        ) : (
-          <Text style={[styles.amountText, { color: c.ghost }]}>0</Text>
-        )}
+        <AmountDigits
+          text={amountText}
+          style={[styles.amountText, amountTone]}
+          placeholderStyle={[styles.amountText, { color: c.ghost }]}
+        />
         <Text style={[styles.amountText, { color: c.ghost }]}>{currencySymbol(currency)}</Text>
         <TextInput
           value={amountText}

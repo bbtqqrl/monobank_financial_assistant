@@ -146,7 +146,8 @@ export function useTransaction(id: number) {
 }
 
 // lists and sums a new or re-categorised transaction can show up in
-const AFFECTED = new Set(['transactions', 'tx-all', 'tx-active-months', 'tx-oldest']);
+// budgets sum the month's spending by category, so a change there moves them too
+const AFFECTED = new Set(['transactions', 'tx-all', 'tx-active-months', 'tx-oldest', 'budgets']);
 
 const refreshLists = (qc: QueryClient) =>
   qc.invalidateQueries({ predicate: (q) => AFFECTED.has(String(q.queryKey[0])) });

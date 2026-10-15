@@ -51,18 +51,48 @@ function sourceLine(t: TransactionDetail): { icon: IconName; text: string; unsur
   }
 }
 
-function CategoryAction({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+// Figma: Деталі, «Змінити категорію»; the merchant-wide one is the accented card
+function ChangeOption({
+  icon,
+  title,
+  sub,
+  primary,
+  onPress,
+}: {
+  icon: IconName;
+  title: string;
+  sub: string;
+  primary?: boolean;
+  onPress: () => void;
+}) {
   const { c } = useTheme();
+  const body = (
+    <>
+      <View style={[styles.optionIcon, { backgroundColor: primary ? withAlpha(c.accent, 0.18) : withAlpha(c.shade, 0.07) }]}>
+        <Icon name={icon} size={16} color={primary ? c.accent : c.inkSoft} weight={1.8} />
+      </View>
+      <View style={styles.optionText}>
+        <Text variant="bodyStrong" style={styles.optionTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text variant="rowCaption" tone={primary ? 'accentText' : 'faint'} numberOfLines={1}>
+          {sub}
+        </Text>
+      </View>
+      <Icon name="chevronRight" size={17} color={primary ? c.accent : c.ghost} weight={1.9} />
+    </>
+  );
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [styles.action, { backgroundColor: withAlpha(c.shade, 0.06) }, pressed && styles.pressed]}
-    >
-      <Icon name={icon} size={15} color={c.inkSoft} weight={2} />
-      <Text variant="bodyStrong" numberOfLines={1} style={styles.actionText}>
-        {label}
-      </Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
+      {primary ? (
+        <View style={[styles.option, styles.optionPrimary, { backgroundColor: withAlpha(c.accent, 0.1), borderColor: withAlpha(c.accent, 0.28) }]}>
+          {body}
+        </View>
+      ) : (
+        <Glass radius={18} contentStyle={styles.option}>
+          {body}
+        </Glass>
+      )}
     </Pressable>
   );
 }
@@ -177,12 +207,6 @@ export default function TransactionScreen() {
             </View>
           </View>
         </View>
-        <View style={styles.actions}>
-          <CategoryAction icon="pencil" label="Змінити" onPress={() => changeCategory()} />
-          {forMerchant ? (
-            <CategoryAction icon="repeat" label="Змінити для всіх" onPress={() => changeCategory('merchant')} />
-          ) : null}
-        </View>
       </Glass>
 
       {info.length > 0 && (
@@ -203,6 +227,27 @@ export default function TransactionScreen() {
           ))}
         </Glass>
       )}
+
+      <View style={styles.change}>
+        <Text variant="labelCaps" tone="ghost">
+          Змінити категорію
+        </Text>
+        <ChangeOption
+          icon="pencil"
+          title="Тільки ця транзакція"
+          sub="Не впливає на майбутні покупки"
+          onPress={() => changeCategory()}
+        />
+        {forMerchant ? (
+          <ChangeOption
+            icon="repeat"
+            title="Усі покупки цього мерчанта"
+            sub={`Правило для «${t.description}»`}
+            primary
+            onPress={() => changeCategory('merchant')}
+          />
+        ) : null}
+      </View>
     </Screen>
   );
 }
@@ -213,24 +258,19 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, lineHeight: 21, textAlign: 'center' },
   amount: { fontSize: 29, lineHeight: 33, letterSpacing: -0.29, fontVariant: ['tabular-nums'] },
   date: { fontSize: 12.5 },
-  category: { paddingTop: 12, paddingHorizontal: 16, paddingBottom: 14, gap: 12 },
+  category: { paddingVertical: 12, paddingHorizontal: 16, gap: 10 },
   categoryRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   categoryText: { flex: 1, gap: 6, alignItems: 'flex-start' },
   categoryName: { fontSize: 16, lineHeight: 21 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 8 },
   badgeText: { fontSize: 11.5, lineHeight: 15 },
-  actions: { flexDirection: 'row', gap: 8 },
-  action: {
-    flex: 1,
-    height: 40,
-    borderRadius: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 10,
-  },
-  actionText: { fontSize: 13.5, flexShrink: 1 },
+  change: { gap: 7 },
+  // Figma: 9 15 9 15, gap 11
+  option: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 9, paddingHorizontal: 15 },
+  optionPrimary: { borderRadius: 18, borderWidth: 1 },
+  optionIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  optionText: { flex: 1, gap: 2 },
+  optionTitle: { fontSize: 13.5 },
   // Figma: 12 16 4 16
   info: { paddingTop: 12, paddingHorizontal: 16, paddingBottom: 4 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingVertical: 6 },
