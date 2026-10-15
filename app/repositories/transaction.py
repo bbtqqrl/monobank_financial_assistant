@@ -89,7 +89,8 @@ class TransactionRepository:
         if search:
             conditions.append(TransactionRaw.description.ilike(f"%{search}%"))
         if category_id is not None:
-            conditions.append(TransactionRaw.category_id == category_id)
+            # A parent category also covers its children (the tree is two levels deep).
+            conditions.append(or_(TransactionRaw.category_id == category_id, Category.parent_id == category_id))
 
         base = _with_category_and_currency().where(*conditions)
 
