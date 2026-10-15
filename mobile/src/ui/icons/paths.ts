@@ -136,9 +136,10 @@ export const ICONS = {
   health: [
     ['path', { d: 'M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6Z' }],
   ],
+  // centred in the box: the shape spans 5..19 both ways
   pencil: [
-    ['path', { d: 'M4 20h4l10-10-4-4L4 16Z' }],
-    ['path', { d: 'M14 6l4 4' }],
+    ['path', { d: 'M5 19h4l10-10-4-4L5 15Z' }],
+    ['path', { d: 'M15 5l4 4' }],
   ],
   repeat: [
     ['path', { d: 'M20 7H9a4 4 0 0 0 0 8h6a4 4 0 0 1 0 8H4' }],

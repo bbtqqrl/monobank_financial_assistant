@@ -25,3 +25,6 @@ export const QUICK_SLUGS: Record<DraftDirection, readonly string[]> = {
 
 // the category picked for a new transaction; its own sheet writes here
 export const draftCategory = createStore<CategoryBrief | null>(null);
+
+// the category picked for a new budget; its picker sheet writes here
+export const budgetCategory = createStore<CategoryBrief | null>(null);

@@ -1,8 +1,9 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -34,6 +35,16 @@ export default function RootLayout() {
     if (ready) SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
 
+  // the window under the screens shows in the rounded corners while one slides away
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(c.bg).catch(() => {});
+  }, [c.bg]);
+
+  // the stack paints its container with the navigation theme's background, a light grey
+  // by default, and that's what shows around a screen being swiped back
+  const base = dark ? DarkTheme : DefaultTheme;
+  const navTheme = { ...base, colors: { ...base.colors, background: c.bg } };
+
   if (!ready) return null;
 
   const signedIn = session === 'signedIn';
@@ -42,35 +53,40 @@ export default function RootLayout() {
       presentation: 'formSheet',
       sheetAllowedDetents: detents,
       sheetGrabberVisible: true,
-      sheetCornerRadius: 28,
       // clear glass would smear dark buttons under it
       contentStyle: { backgroundColor: withAlpha(c.sheet, 0.86) },
     }) as const;
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <QueryClientProvider client={queryClient}>
-        <StatusBar style={dark ? 'light' : 'dark'} />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: c.bg },
-          }}
-        >
-          <Stack.Protected guard={signedIn}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="profile" />
-            <Stack.Screen name="transaction/[id]/index" />
-            <Stack.Screen name="transaction/[id]/category" options={sheet([0.75, 1])} />
-            <Stack.Screen name="new/index" options={sheet([1])} />
-            <Stack.Screen name="new/category" options={sheet([0.75, 1])} />
-            <Stack.Screen name="cards" options={sheet('fitToContents')} />
-          </Stack.Protected>
-          <Stack.Protected guard={!signedIn}>
-            <Stack.Screen name="login" />
-          </Stack.Protected>
-        </Stack>
-      </QueryClientProvider>
+      <ThemeProvider value={navTheme}>
+        <QueryClientProvider client={queryClient}>
+          <StatusBar style={dark ? 'light' : 'dark'} />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: c.bg },
+            }}
+          >
+            <Stack.Protected guard={signedIn}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="profile" />
+              <Stack.Screen name="transaction/[id]/index" />
+              <Stack.Screen name="transaction/[id]/category" options={sheet([0.75, 1])} />
+              <Stack.Screen name="new/index" options={sheet([1])} />
+              <Stack.Screen name="new/category" options={sheet([0.75, 1])} />
+              <Stack.Screen name="cards" options={sheet('fitToContents')} />
+              <Stack.Screen name="theme" options={sheet('fitToContents')} />
+              <Stack.Screen name="budget/[id]" />
+              <Stack.Screen name="budget/index" options={sheet([1])} />
+              <Stack.Screen name="budget/category" options={sheet([0.75, 1])} />
+            </Stack.Protected>
+            <Stack.Protected guard={!signedIn}>
+              <Stack.Screen name="login" />
+            </Stack.Protected>
+          </Stack>
+        </QueryClientProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }
