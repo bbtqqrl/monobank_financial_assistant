@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { tap } from '@/lib/haptics';
 import { useTheme, whiteAlpha, withAlpha } from '@/theme';
 import { StepButton } from '@/ui/StepButton';
 import { Text } from '@/ui/Text';
@@ -58,7 +59,10 @@ export function MonthGrid({ year, month, onPick, isEnabled, minYear }: Props) {
                   accessibilityRole="button"
                   accessibilityState={{ selected, disabled: off }}
                   disabled={off}
-                  onPress={() => onPick(shown, i)}
+                  onPress={() => {
+                    tap();
+                    onPick(shown, i);
+                  }}
                   style={({ pressed }) => [
                     styles.tile,
                     selected

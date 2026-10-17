@@ -22,7 +22,7 @@ import { AccessibilityInfo, Platform } from 'react-native';
 import { useAnimatedScrollHandler, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { thud } from '@/lib/haptics';
+import { settle } from '@/lib/haptics';
 import { createStore, type Store } from '@/lib/store';
 import type { Flash } from '@/lib/useFlash';
 
@@ -57,7 +57,7 @@ export function usePullRefresh(run: () => Promise<Flash | void>): PullRefresh {
     if (busy.current) return;
     busy.current = true;
     clearTimeout(timer.current);
-    thud();
+    settle();
     status.set('busy');
     latest
       .current()

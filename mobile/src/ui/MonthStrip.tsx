@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { FONT } from '@/lib/fonts';
+import { tap } from '@/lib/haptics';
 import { monthName } from '@/lib/period';
 import { useTheme, withAlpha } from '@/theme';
 import { Glass } from '@/ui/Glass';
@@ -104,7 +105,11 @@ export function MonthStrip({ months, active, onPick, isEnabled }: Props) {
               accessibilityRole="tab"
               accessibilityState={{ selected: i === active, disabled: !enabled }}
               disabled={!enabled}
-              onPress={() => onPick(i)}
+              onPress={() => {
+                if (i === active) return;
+                tap();
+                onPick(i);
+              }}
               onLayout={(e) => {
                 const { x, width: w } = e.nativeEvent.layout;
                 layouts.current[i] = { x, w };

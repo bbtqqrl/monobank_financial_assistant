@@ -1,3 +1,4 @@
+import { tap } from '@/lib/haptics';
 import { Pill, PillRow } from '@/ui/Pill';
 
 type Option<K extends string> = { key: K; label: string };
@@ -12,7 +13,17 @@ export function FilterPills<K extends string>({ options, value, onChange }: Prop
   return (
     <PillRow>
       {options.map((o) => (
-        <Pill key={o.key} role="tab" label={o.label} active={o.key === value} onPress={() => onChange(o.key)} />
+        <Pill
+          key={o.key}
+          role="tab"
+          label={o.label}
+          active={o.key === value}
+          onPress={() => {
+            if (o.key === value) return;
+            tap();
+            onChange(o.key);
+          }}
+        />
       ))}
     </PillRow>
   );

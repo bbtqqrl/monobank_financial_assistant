@@ -14,6 +14,7 @@ import {
   type TransactionDetail,
 } from '@/api/transactions';
 import { categoryLook } from '@/lib/categories';
+import { failure, thud } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
 import { fullDate } from '@/lib/time';
 import { goBack } from '@/lib/nav';
@@ -116,8 +117,14 @@ export default function TransactionScreen() {
         style: 'destructive',
         onPress: () =>
           remove.mutate(undefined, {
-            onSuccess: goBack,
-            onError: () => Alert.alert('Не вдалося видалити', 'Перевір інтернет і спробуй ще раз'),
+            onSuccess: () => {
+              thud();
+              goBack();
+            },
+            onError: () => {
+              failure();
+              Alert.alert('Не вдалося видалити', 'Перевір інтернет і спробуй ще раз');
+            },
           }),
       },
     ]);

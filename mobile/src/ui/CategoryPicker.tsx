@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toBrief, useCategories, type CategoryBrief, type CategoryKind, type CategoryNode } from '@/api/categories';
 import { categoryLook, type CategoryLook } from '@/lib/categories';
+import { tap } from '@/lib/haptics';
 import { Button } from '@/ui/Button';
 import { CategoryOption } from '@/ui/CategoryOption';
 import { SearchField } from '@/ui/SearchField';
@@ -66,7 +67,9 @@ export function CategoryPicker({ title, subtitle, controls, note, selectedId, al
     selectedId,
     busyId,
     onPick: (category) => {
-      if (busyId === undefined) onPick(toBrief(category));
+      if (busyId !== undefined) return;
+      tap();
+      onPick(toBrief(category));
     },
   };
   const q = normalize(query);
@@ -110,7 +113,10 @@ export function CategoryPicker({ title, subtitle, controls, note, selectedId, al
                 look={ALL_LOOK}
                 name={allLabel}
                 selected={selectedId === null}
-                onPress={() => onPick(null)}
+                onPress={() => {
+                  tap();
+                  onPick(null);
+                }}
               />
             ) : null}
             {SECTIONS.map(({ kind, title: sectionTitle }) => {

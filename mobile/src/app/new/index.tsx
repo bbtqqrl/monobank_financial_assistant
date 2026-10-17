@@ -190,7 +190,8 @@ export default function NewTransactionSheet() {
                   single
                   from={day}
                   onChange={(picked) => {
-                    if (picked) pickDay(picked);
+                    // the calendar ticks on its own
+                    if (picked) setDay(picked);
                     setCalendarOpen(false);
                   }}
                 />

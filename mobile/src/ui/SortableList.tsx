@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { tap, thud } from '@/lib/haptics';
+import { settle, tap, thud } from '@/lib/haptics';
 
 type Props<T> = {
   items: T[];
@@ -102,6 +102,7 @@ function Row({ id, slots, count, rowHeight, onDrop, children }: {
           if (!dragging.get()) return;
           dragging.set(false);
           y.set(withSpring((slots.get()[id] ?? 0) * rowHeight, SPRING));
+          scheduleOnRN(settle);
           scheduleOnRN(onDrop, slots.get());
         }),
     [count, dragging, from, id, onDrop, rowHeight, slots, y],
