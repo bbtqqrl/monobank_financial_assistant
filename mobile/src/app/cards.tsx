@@ -6,7 +6,7 @@ import { accountName, ownBalance, sortedAccounts, useAccounts, type Account } fr
 import { cardOrder, hiddenCards, resetCards, saveCardOrder, setCardHidden } from '@/lib/cardOrder';
 import { FONT } from '@/lib/fonts';
 import { formatMoney } from '@/lib/money';
-import { tap } from '@/lib/haptics';
+import { toggle } from '@/lib/haptics';
 import { useMask } from '@/lib/privacy';
 import { useTheme, withAlpha } from '@/theme';
 import { Button } from '@/ui/Button';
@@ -50,7 +50,7 @@ function CardRow({ account, hidden, canHide }: { account: Account; hidden: boole
         disabled={locked}
         hitSlop={6}
         onPress={() => {
-          tap();
+          toggle();
           setCardHidden(account.id, !hidden);
         }}
         style={({ pressed }) => [

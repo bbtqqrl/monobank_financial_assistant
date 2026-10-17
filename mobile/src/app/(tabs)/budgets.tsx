@@ -3,6 +3,7 @@ import { Fragment } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { budgetRatio, useBudgets, type Budget } from '@/api/budgets';
+import { hold } from '@/lib/haptics';
 import { usePullRefresh } from '@/lib/usePullRefresh';
 import { useTheme, withAlpha } from '@/theme';
 import { BudgetRow } from '@/ui/BudgetRow';
@@ -17,6 +18,10 @@ import { Text } from '@/ui/Text';
 
 const newBudget = () => router.push('/budget');
 const openBudget = (id: number) => router.push({ pathname: '/budget/[id]', params: { id: String(id) } });
+const editBudget = (id: number) => {
+  hold();
+  router.push({ pathname: '/budget', params: { id: String(id) } });
+};
 
 // the ones over their limit come first, then the closest to it
 const byPressure = (a: Budget, b: Budget) => budgetRatio(b) - budgetRatio(a);
@@ -86,7 +91,7 @@ export default function BudgetsScreen() {
             {list.map((b, i) => (
               <Fragment key={b.id}>
                 {i > 0 && <View style={[styles.divider, { backgroundColor: withAlpha(c.shade, 0.07) }]} />}
-                <BudgetRow budget={b} onPress={() => openBudget(b.id)} />
+                <BudgetRow budget={b} onPress={() => openBudget(b.id)} onLongPress={() => editBudget(b.id)} />
               </Fragment>
             ))}
           </Glass>

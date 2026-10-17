@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { balanceHidden, setBalanceHidden } from '@/lib/cardOrder';
-import { tap } from '@/lib/haptics';
+import { toggle } from '@/lib/haptics';
 import { useTheme } from '@/theme';
 import { BalanceCard } from '@/ui/BalanceCard';
 
@@ -45,14 +45,14 @@ export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData
   });
 
   // one switch for every card, remembered between launches
-  const toggle = () => {
-    tap();
+  const flipHidden = () => {
+    toggle();
     setBalanceHidden(!hidden);
   };
 
   if (cards.length < 2) {
     const { key: _key, ...card } = cards[0] ?? { key: 0 };
-    return <BalanceCard {...card} hidden={hidden} onToggleHidden={toggle} onLongPress={onLongPress} />;
+    return <BalanceCard {...card} hidden={hidden} onToggleHidden={flipHidden} onLongPress={onLongPress} />;
   }
 
   return (
@@ -73,7 +73,7 @@ export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData
             <BalanceCard
               {...card}
               hidden={hidden}
-              onToggleHidden={toggle}
+              onToggleHidden={flipHidden}
               onLongPress={onLongPress}
               style={{ width: cardWidth }}
             />

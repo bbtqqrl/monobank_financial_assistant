@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { register, signIn } from '@/api/auth';
 import { ApiError } from '@/api/client';
 import { FONT } from '@/lib/fonts';
+import { failure, success } from '@/lib/haptics';
 import { Backdrop } from '@/ui/Backdrop';
 import { Button } from '@/ui/Button';
 import { Text } from '@/ui/Text';
@@ -17,6 +18,8 @@ function describe(e: unknown, mode: Mode) {
     if (e.status === 401) return 'Неправильна пошта або пароль';
     if (e.status === 409) return 'Акаунт з цією поштою вже є';
     if (e.status === 422) return mode === 'register' ? 'Перевір пошту, пароль від 8 символів' : 'Перевір пошту';
+    // the backend limits sign-in and sign-up attempts
+    if (e.status === 429) return 'Забагато спроб, спробуй трохи згодом';
     return `Сервер відповів помилкою (${e.status})`;
   }
   return 'Немає зʼєднання з сервером';
@@ -39,7 +42,9 @@ export default function LoginScreen() {
       if (mode === 'login') await signIn(email.trim(), password);
       else await register(email.trim(), password);
       // the root layout switches to the tabs once tokens are saved
+      success();
     } catch (e) {
+      failure();
       setError(describe(e, mode));
       setBusy(false);
     }

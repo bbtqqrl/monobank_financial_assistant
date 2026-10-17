@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { FONT } from '@/lib/fonts';
+import { tap } from '@/lib/haptics';
 import { isoDate, monthTitle, parseIso } from '@/lib/period';
 import { useTheme, withAlpha } from '@/theme';
 import { StepButton } from '@/ui/StepButton';
@@ -42,6 +43,7 @@ export function RangeCalendar({ from, to, onChange, single = false }: Props) {
   const weeks = Array.from({ length: cells.length / 7 }, (_, w) => cells.slice(w * 7, w * 7 + 7));
 
   const pick = (day: string) => {
+    tap();
     if (single || !from || to) onChange(day, undefined);
     else if (day < from) onChange(day, from);
     else onChange(from, day);

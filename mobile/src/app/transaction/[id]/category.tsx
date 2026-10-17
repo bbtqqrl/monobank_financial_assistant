@@ -5,6 +5,7 @@ import { useAccountCurrencies } from '@/api/accounts';
 import type { CategoryKind } from '@/api/categories';
 import { ApiError } from '@/api/client';
 import { isUncategorized, isUnsure, txCurrency, useSetCategory, useTransaction, type Transaction } from '@/api/transactions';
+import { failure, success } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
 import { dayLabel } from '@/lib/time';
 import { useMask } from '@/lib/privacy';
@@ -67,14 +68,19 @@ export default function ChangeCategorySheet() {
         change.mutate(
           { category, mappingId: merchant ? mappingId : undefined },
           {
-            onSuccess: close,
-            onError: (error) =>
+            onSuccess: () => {
+              success();
+              close();
+            },
+            onError: (error) => {
+              failure();
               Alert.alert(
                 'Не вдалося змінити категорію',
                 error instanceof ApiError && error.status === 400
                   ? 'Ця категорія не підходить для цієї транзакції'
                   : 'Перевір інтернет і спробуй ще раз',
-              ),
+              );
+            },
           },
         );
       }}

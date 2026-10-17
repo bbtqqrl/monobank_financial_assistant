@@ -5,21 +5,36 @@ import { categoryLook } from '@/lib/categories';
 import { FONT } from '@/lib/fonts';
 import { formatMoney } from '@/lib/money';
 import { useMask } from '@/lib/privacy';
-import { useTheme, withAlpha } from '@/theme';
+import { useTheme, withAlpha, type Colors } from '@/theme';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Text } from '@/ui/Text';
 
 // past this share of the limit the bar turns amber
 const NEAR = 0.9;
 
+// the category's own colour, amber close to the limit, red past it
+export function limitTone(ratio: number, own: string, c: Colors) {
+  return ratio > 1 ? c.danger : ratio >= NEAR ? c.warning : own;
+}
+
+type Props = {
+  budget: Budget;
+  onPress?: () => void;
+  // held: straight to changing the limit
+  onLongPress?: () => void;
+};
+
+// as long as the balance card takes to open its settings
+const HOLD_MS = 380;
+
 // One category's limit: chip · name, a bar of how much is gone, what's left
-export function BudgetRow({ budget, onPress }: { budget: Budget; onPress?: () => void }) {
+export function BudgetRow({ budget, onPress, onLongPress }: Props) {
   const { c, dark } = useTheme();
   const mask = useMask();
   const look = categoryLook(budget.category.slug, -1);
   const ratio = budgetRatio(budget);
   const over = ratio > 1;
-  const tone = over ? c.danger : ratio >= NEAR ? c.warning : c.category[look.color];
+  const tone = limitTone(ratio, c.category[look.color], c);
   const left = budget.amount - budget.current_amount;
   const money = (v: number) => mask(formatMoney(v, undefined, { cents: false }));
 
@@ -27,7 +42,13 @@ export function BudgetRow({ budget, onPress }: { budget: Budget; onPress?: () =>
     <Pressable
       accessibilityRole="button"
       accessibilityHint="Відкрити бюджет"
+      accessibilityActions={onLongPress ? [{ name: 'longpress', label: 'Змінити ліміт' }] : undefined}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={HOLD_MS}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <CategoryChip {...look} size={36} radius={12} />

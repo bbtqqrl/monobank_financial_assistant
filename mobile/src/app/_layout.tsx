@@ -78,7 +78,11 @@ export default function RootLayout() {
               <Stack.Screen name="cards" options={sheet('fitToContents')} />
               <Stack.Screen name="theme" options={sheet('fitToContents')} />
               <Stack.Screen name="budget/[id]" />
-              <Stack.Screen name="budget/index" options={sheet([1])} />
+              {/* a new one needs the whole height, changing a limit only its content */}
+              <Stack.Screen
+                name="budget/index"
+                options={({ route }) => sheet((route.params as { id?: string } | undefined)?.id ? 'fitToContents' : [1])}
+              />
               <Stack.Screen name="budget/category" options={sheet([0.75, 1])} />
             </Stack.Protected>
             <Stack.Protected guard={!signedIn}>

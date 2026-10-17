@@ -6,7 +6,7 @@ import { accountName, ownBalance, sortedAccounts, useAccountCurrencies, useAccou
 import { REFRESH_FLASH, refreshAccounts } from '@/api/monobank';
 import { useTransactions } from '@/api/transactions';
 import { cardOrder, hiddenCards } from '@/lib/cardOrder';
-import { thud } from '@/lib/haptics';
+import { hold } from '@/lib/haptics';
 import { formatMoney } from '@/lib/money';
 import { whenLabel } from '@/lib/time';
 import { txRow } from '@/lib/txRow';
@@ -20,7 +20,7 @@ import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 
 const openCards = () => {
-  thud();
+  hold();
   router.push('/cards');
 };
 
