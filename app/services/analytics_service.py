@@ -2,7 +2,7 @@ import calendar
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,29 +10,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.analytics import AnalyticsRepository, TransactionFilter, month_bounds
 from app.schemas.analytics import (
     CategoriesResponse,
-    CategoryBreakdown,
     CategoryChange,
     CategoryItem,
     CategoryRef,
-    CategoryShare,
+    ChangesResponse,
+    ComparePreset,
+    ComparisonInfo,
     DailyPoint,
     Insight,
     InsightAction,
+    InsightsResponse,
     MerchantItem,
     MerchantsResponse,
+    MonthlyResponse,
     MonthTotal,
     OtherShare,
-    SummaryResponse,
-    TrendsResponse,
+    PeriodInfo,
+    SpendingResponse,
 )
 from app.services.merchant_key import build_merchant_key
 
 EXPENSE_KINDS = ("expense",)
+DEFAULT_PERIOD_DAYS = 30
+MAX_PERIOD_DAYS = 3 * 366
+SCALED_PRESETS = {"last_3_months": 3, "last_6_months": 6, "last_year": 12}
 MIN_CHANGE_AMOUNT = 20_000
-MAX_CHANGES = 4
-MAX_INSIGHTS = 3
 MIN_GROWTH_STREAK = 2
-TOP_MERCHANTS = 3
+INSIGHT_WINDOW_MONTHS = 6
+MAX_INSIGHTS = 3
 EQUAL_TOLERANCE = 0.01
 
 MONTH_LOCATIVE = (
@@ -45,6 +50,38 @@ ORDINALS = {
 }
 
 
+class PeriodError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class Period:
+    start: date
+    end: date
+
+    @property
+    def days(self) -> int:
+        return (self.end - self.start).days + 1
+
+    def info(self) -> PeriodInfo:
+        return PeriodInfo(start=self.start, end=self.end, days=self.days)
+
+
+@dataclass(frozen=True)
+class Comparison:
+    type: str
+    period: Period
+    scaled: bool
+
+
+@dataclass
+class DayRow:
+    month: str
+    day: int
+    category: CategoryRef
+    spent: int
+
+
 def parse_month(value: str) -> date:
     year, month = value.split("-")
     return date(int(year), int(month), 1)
@@ -54,15 +91,24 @@ def month_key(month: date) -> str:
     return f"{month.year:04d}-{month.month:02d}"
 
 
-def shift_month(month: date, delta: int) -> date:
-    index = month.year * 12 + month.month - 1 + delta
-    return date(index // 12, index % 12 + 1, 1)
+def add_months(day: date, months: int) -> date:
+    year, month = divmod(day.year * 12 + day.month - 1 + months, 12)
+    month += 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
-def change_pct(current: int, previous: int) -> float | None:
-    if previous <= 0:
+def month_end(month: date) -> date:
+    return month.replace(day=calendar.monthrange(month.year, month.month)[1])
+
+
+def is_full_month(period: Period) -> bool:
+    return period.start.day == 1 and period.end == month_end(period.start)
+
+
+def change_pct(current: int, baseline: int) -> float | None:
+    if baseline <= 0:
         return None
-    return round((current - previous) / previous * 100, 1)
+    return round((current - baseline) / baseline * 100, 1)
 
 
 def share(amount: int, total: int) -> float:
@@ -82,13 +128,52 @@ def growth_streak(values: list[int]) -> int:
     return streak
 
 
-@dataclass
-class DayRow:
-    month: str
-    day: int
-    category: CategoryRef
-    spent: int
-    count: int
+def resolve_period(today: date, month: str | None, date_from: date | None, date_to: date | None) -> Period:
+    if month and (date_from or date_to):
+        raise PeriodError("Use either month or from/to, not both")
+    if (date_from is None) != (date_to is None):
+        raise PeriodError("from and to must be given together")
+
+    if month:
+        start = parse_month(month)
+        end = month_end(start)
+    elif date_from is not None:
+        if date_from > date_to:
+            raise PeriodError("from must not be after to")
+        start, end = date_from, date_to
+    else:
+        start, end = today - timedelta(days=DEFAULT_PERIOD_DAYS - 1), today
+
+    if start > today:
+        raise PeriodError("The period is in the future")
+    period = Period(start, min(end, today))
+    if period.days > MAX_PERIOD_DAYS:
+        raise PeriodError(f"The period can't be longer than {MAX_PERIOD_DAYS} days")
+    return period
+
+
+def resolve_comparison(
+    period: Period, preset: ComparePreset, compare_from: date | None, compare_to: date | None,
+) -> Comparison:
+    if (compare_from is None) != (compare_to is None):
+        raise PeriodError("compare_from and compare_to must be given together")
+    if compare_from is not None:
+        if compare_from > compare_to:
+            raise PeriodError("compare_from must not be after compare_to")
+        return Comparison("custom", Period(compare_from, compare_to), scaled=True)
+
+    if preset in SCALED_PRESETS:
+        end = period.start - timedelta(days=1)
+        return Comparison(preset, Period(add_months(period.start, -SCALED_PRESETS[preset]), end), scaled=True)
+
+    if preset == "previous_period":
+        end = period.start - timedelta(days=1)
+        return Comparison(preset, Period(end - timedelta(days=period.days - 1), end), scaled=False)
+
+    months_back = -1 if preset == "previous_month" else -12
+    start = add_months(period.start, months_back)
+    end = month_end(start) if is_full_month(period) else add_months(period.end, months_back)
+    return Comparison(preset, Period(start, end), scaled=False)
 
 
 class AnalyticsService:
@@ -98,164 +183,78 @@ class AnalyticsService:
         self.user_id = user_id
         self.timezone = timezone
         self.account_ids = account_ids
-        today = datetime.now(ZoneInfo(timezone)).date()
-        self.today = today
-        self.current_month = date(today.year, today.month, 1)
+        self.today = datetime.now(ZoneInfo(timezone)).date()
+        self.current_month = self.today.replace(day=1)
+        self._history_start: date | None = None
+        self._history_loaded = False
 
-    def current_month_key(self) -> str:
-        return month_key(self.current_month)
+    async def spending(self, period: Period, comparison: Comparison) -> SpendingResponse:
+        rows = await self._aggregate(period, ["day"])
+        per_day = {row["day"]: -row["sum"] for row in rows}
+        total = max(sum(per_day.values()), 0)
+        comparison_info = await self._comparison_info(period, comparison)
 
-    async def summary(self, month: date, top: int) -> SummaryResponse:
-        previous = shift_month(month, -1)
-        rows = await self._day_rows(previous, month)
-        cap_day = self._cap_day(month)
-        current_rows = [row for row in rows if row.month == month_key(month)]
+        daily = []
+        running = 0
+        for offset in range(period.days):
+            day = period.start + timedelta(days=offset)
+            running += per_day.get(day.isoformat(), 0)
+            daily.append(DailyPoint(date=day, amount=running))
 
-        total = self._total(current_rows)
-        previous_total = self._total(rows, month_key(previous), upto_day=cap_day)
-        by_category = self._by_category(current_rows)
-
-        top_items = [
-            CategoryShare(category_id=c.id, name=c.name, slug=c.slug, amount=amount, share=share(amount, total))
-            for c, amount, _ in by_category[:top]
-        ]
-        other_amount = max(total - sum(item.amount for item in top_items), 0)
-
-        merchants = await self._merchants(month)
-        return SummaryResponse(
-            month=month_key(month),
-            total_spent=total,
-            previous_total=previous_total,
-            change_pct=change_pct(total, previous_total),
-            comparison=self._comparison(month),
-            daily_cumulative=self._daily_cumulative(month, current_rows),
-            categories=CategoryBreakdown(
-                top=top_items,
-                other=OtherShare(amount=other_amount, share=share(other_amount, total)),
-            ),
-            top_merchants=merchants[:TOP_MERCHANTS],
+        return SpendingResponse(
+            period=period.info(),
+            total=total,
+            comparison=comparison_info,
+            change_pct=change_pct(total, comparison_info.expected),
+            daily=daily,
         )
 
-    async def categories(self, month: date, sort: str) -> CategoriesResponse:
-        previous = shift_month(month, -1)
-        rows = await self._day_rows(previous, month)
-        cap_day = self._cap_day(month)
-        current_rows = [row for row in rows if row.month == month_key(month)]
-        previous_rows = [
-            row for row in rows
-            if row.month == month_key(previous) and (cap_day is None or row.day <= cap_day)
-        ]
+    async def categories(
+        self, period: Period, comparison: Comparison, top: int | None, sort: str,
+    ) -> CategoriesResponse:
+        totals = await self._aggregate(period, [])
+        total = max(-totals[0]["sum"], 0) if totals else 0
+        current = await self._category_totals(period)
+        expected = await self._expected_by_category(period, comparison)
 
-        total = self._total(current_rows)
-        previous_by_id = {c.id: amount for c, amount, _ in self._by_category(previous_rows)}
         items = [
             CategoryItem(
-                category_id=c.id,
-                name=c.name,
-                slug=c.slug,
+                category_id=category.id,
+                name=category.name,
+                slug=category.slug,
                 amount=amount,
                 share=share(amount, total),
                 transaction_count=count,
-                previous_amount=previous_by_id.get(c.id, 0),
-                change_pct=change_pct(amount, previous_by_id.get(c.id, 0)),
+                expected=expected.get(category.id, 0),
+                change_pct=change_pct(amount, expected.get(category.id, 0)),
             )
-            for c, amount, count in self._by_category(current_rows)
+            for category, amount, count in current
         ]
         if sort == "count":
             items.sort(key=lambda item: (-item.transaction_count, -item.amount))
         elif sort == "change":
-            items.sort(key=lambda item: -(item.amount - item.previous_amount))
+            items.sort(key=lambda item: -(item.amount - item.expected))
+
+        other = None
+        if top is not None:
+            items = items[:top]
+            other_amount = max(total - sum(item.amount for item in items), 0)
+            other = OtherShare(amount=other_amount, share=share(other_amount, total))
 
         return CategoriesResponse(
-            month=month_key(month),
-            transaction_count=sum(row.count for row in current_rows),
-            total_spent=total,
-            comparison=self._comparison(month),
+            period=period.info(),
+            total=total,
+            transaction_count=totals[0]["count"] if totals else 0,
+            comparison=await self._comparison_info(period, comparison),
             items=items,
+            other=other,
         )
 
-    async def merchants(self, month: date, limit: int, offset: int) -> MerchantsResponse:
-        merchants = await self._merchants(month)
-        return MerchantsResponse(
-            month=month_key(month),
-            total=len(merchants),
-            limit=limit,
-            offset=offset,
-            items=merchants[offset:offset + limit],
-        )
-
-    async def trends(self, month: date, months: int) -> TrendsResponse:
-        first = shift_month(month, -(months - 1))
-        window = [shift_month(first, i) for i in range(months)]
-        rows = await self._day_rows(first, month)
-        history_start = await self._history_start()
-        cap_day = self._cap_day(month)
-
-        monthly = []
-        for m in window:
-            has_data = history_start is not None and m >= date(history_start.year, history_start.month, 1) \
-                and m <= self.current_month
-            complete = has_data and m != self.current_month and not (
-                m == date(history_start.year, history_start.month, 1) and history_start.day > 1
-            )
-            monthly.append(MonthTotal(
-                month=month_key(m), total=self._total(rows, month_key(m)), has_data=has_data, complete=complete,
-            ))
-
-        complete_months = [item for item in monthly if item.complete]
-        average = round(statistics.mean(item.total for item in complete_months)) if complete_months else None
-
-        selected = monthly[-1]
-        selected_vs_average = None
-        if complete_months and selected.has_data:
-            if cap_day is not None:
-                baseline = statistics.mean(
-                    self._total(rows, item.month, upto_day=cap_day) for item in complete_months
-                )
-                selected_vs_average = self._versus(selected.total, baseline)
-            elif selected.complete:
-                selected_vs_average = self._versus(selected.total, average)
-
-        return TrendsResponse(
-            month=month_key(month),
-            monthly=monthly,
-            average=average,
-            selected_vs_average=selected_vs_average,
-            comparison=self._comparison(month),
-            changes_vs_previous=self._changes(rows, month, cap_day),
-            insights=self._insights(rows, month, monthly, cap_day) if selected.has_data else [],
-        )
-
-    async def _day_rows(self, first: date, last: date) -> list[DayRow]:
-        date_from, _ = month_bounds(first, self.timezone)
-        _, date_to = month_bounds(last, self.timezone)
-        result = await self.repo.aggregate(
-            self.user_id,
-            TransactionFilter(
-                date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids,
-            ),
-            self.timezone,
-            group_by=["category", "day"],
-            metrics=["sum", "count"],
-        )
-        return [
-            DayRow(
-                month=row["day"][:7],
-                day=int(row["day"][8:]),
-                category=CategoryRef(id=row["category_id"], name=row["category_name"], slug=row["category_slug"]),
-                spent=-row["sum"],
-                count=row["count"],
-            )
-            for row in result
-        ]
-
-    async def _merchants(self, month: date) -> list[MerchantItem]:
-        date_from, date_to = month_bounds(month, self.timezone)
+    async def merchants(self, period: Period, limit: int, offset: int) -> MerchantsResponse:
+        date_from, date_to = self._bounds(period)
         transactions = await self.repo.list_transactions(
             self.user_id,
-            TransactionFilter(
-                date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids,
-            ),
+            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
             self.timezone,
         )
 
@@ -269,10 +268,9 @@ class AnalyticsService:
             amount = -sum(item["amount_uah"] for item in items)
             if amount <= 0:
                 continue
-            categories = Counter(
+            category_id, category_name, category_slug = Counter(
                 (item["category_id"], item["category_name"], item["category_slug"]) for item in items
-            )
-            category_id, category_name, category_slug = categories.most_common(1)[0][0]
+            ).most_common(1)[0][0]
             merchants.append(MerchantItem(
                 merchant_key=key,
                 name=Counter(item["description"].strip() for item in items).most_common(1)[0][0],
@@ -281,59 +279,93 @@ class AnalyticsService:
                 category=CategoryRef(id=category_id, name=category_name, slug=category_slug),
             ))
         merchants.sort(key=lambda merchant: (-merchant.amount, merchant.name))
-        return merchants
 
-    async def _history_start(self) -> date | None:
-        first_time = await self.repo.first_transaction_time(self.user_id)
-        if first_time is None:
-            return None
-        return datetime.fromtimestamp(first_time, ZoneInfo(self.timezone)).date()
+        return MerchantsResponse(
+            period=period.info(),
+            total=len(merchants),
+            limit=limit,
+            offset=offset,
+            items=merchants[offset:offset + limit],
+        )
 
-    def _changes(self, rows: list[DayRow], month: date, cap_day: int | None) -> list[CategoryChange]:
-        previous_key = month_key(shift_month(month, -1))
-        current = {c.id: (c, amount) for c, amount, _ in self._by_category(
-            [row for row in rows if row.month == month_key(month)]
-        )}
-        previous = {c.id: (c, amount) for c, amount, _ in self._by_category(
-            [row for row in rows if row.month == previous_key and (cap_day is None or row.day <= cap_day)]
-        )}
+    async def changes(self, period: Period, comparison: Comparison, limit: int) -> ChangesResponse:
+        current = {category.id: (category, amount) for category, amount, _ in await self._category_totals(period)}
+        expected = await self._expected_by_category(period, comparison)
+        names = await self._category_refs(comparison.period)
 
         changes = []
-        for category_id in current.keys() | previous.keys():
-            category = (current.get(category_id) or previous[category_id])[0]
-            current_amount = current.get(category_id, (None, 0))[1]
-            previous_amount = previous.get(category_id, (None, 0))[1]
-            if max(current_amount, previous_amount) < MIN_CHANGE_AMOUNT or current_amount == previous_amount:
+        for category_id in current.keys() | expected.keys():
+            category = current[category_id][0] if category_id in current else names[category_id]
+            amount = current.get(category_id, (None, 0))[1]
+            baseline = expected.get(category_id, 0)
+            if max(amount, baseline) < MIN_CHANGE_AMOUNT or amount == baseline:
                 continue
             changes.append(CategoryChange(
                 category_id=category.id,
                 name=category.name,
                 slug=category.slug,
-                current=current_amount,
-                previous=previous_amount,
-                change_pct=change_pct(current_amount, previous_amount),
+                amount=amount,
+                expected=baseline,
+                change_pct=change_pct(amount, baseline),
             ))
-        changes.sort(key=lambda change: -abs(change.current - change.previous))
-        return changes[:MAX_CHANGES]
 
-    def _insights(
-        self, rows: list[DayRow], month: date, monthly: list[MonthTotal], cap_day: int | None,
-    ) -> list[Insight]:
+        changes.sort(key=lambda change: -abs(change.amount - change.expected))
+        changes = changes[:limit]
+        changes.sort(key=lambda change: -(change.change_pct if change.change_pct is not None else float("inf")))
+
+        return ChangesResponse(
+            period=period.info(),
+            comparison=await self._comparison_info(period, comparison),
+            items=changes,
+        )
+
+    async def monthly(self, month: date, months: int) -> MonthlyResponse:
+        window = [add_months(month, offset) for offset in range(-(months - 1), 1)]
+        rows = await self._day_rows(window[0], month)
+        monthly = await self._month_totals(window, rows)
+        cap_day = self._cap_day(month)
+
+        complete = [item for item in monthly if item.complete]
+        average = round(statistics.mean(item.total for item in complete)) if complete else None
+
+        selected = monthly[-1]
+        selected_vs_average = None
+        if complete and selected.has_data:
+            if cap_day is not None:
+                baseline = statistics.mean(self._sum(rows, item.month, upto_day=cap_day) for item in complete)
+                selected_vs_average = self._versus(selected.total, baseline)
+            elif selected.complete:
+                selected_vs_average = self._versus(selected.total, average)
+
+        return MonthlyResponse(
+            month=month_key(month),
+            months=monthly,
+            average=average,
+            selected_vs_average=selected_vs_average,
+        )
+
+    async def insights(self, month: date) -> InsightsResponse:
+        window = [add_months(month, offset) for offset in range(-(INSIGHT_WINDOW_MONTHS - 1), 1)]
+        rows = await self._day_rows(window[0], month)
+        monthly = await self._month_totals(window, rows)
+        if not monthly[-1].has_data:
+            return InsightsResponse(month=month_key(month), items=[])
+
         eligible = []
         for item in reversed(monthly[:-1]):
             if not item.complete:
                 break
             eligible.insert(0, item.month)
         if not eligible:
-            return []
-        series_months = [*eligible, month_key(month)]
+            return InsightsResponse(month=month_key(month), items=[])
 
+        cap_day = self._cap_day(month)
+        series_months = [*eligible, month_key(month)]
         categories = {row.category.id: row.category for row in rows if row.month == month_key(month)}
+
         insights = []
         for category_id, category in categories.items():
-            values = [
-                self._total(rows, m, category_id=category_id, upto_day=cap_day) for m in series_months
-            ]
+            values = [self._sum(rows, m, category_id=category_id, upto_day=cap_day) for m in series_months]
             streak = growth_streak(values)
             if streak < MIN_GROWTH_STREAK:
                 continue
@@ -342,77 +374,146 @@ class AnalyticsService:
             diff = current - baseline
             if diff < MIN_CHANGE_AMOUNT:
                 continue
+            title, text = self._growth_text(category.name, streak, month, current, diff, cap_day is not None)
             insights.append(Insight(
                 type="category_growth_streak",
                 category_id=category_id,
                 category_name=category.name,
+                title=title,
+                text=text,
                 streak_months=streak,
                 current=current,
                 baseline=baseline,
                 diff=diff,
-                text=self._growth_text(category.name, streak, month, current, diff, cap_day is not None),
                 action=InsightAction(type="open_transactions", category_id=category_id, month=month_key(month)),
             ))
         insights.sort(key=lambda insight: -insight.diff)
-        return insights[:MAX_INSIGHTS]
+        return InsightsResponse(month=month_key(month), items=insights[:MAX_INSIGHTS])
 
-    @staticmethod
-    def _growth_text(name: str, streak: int, month: date, current: int, diff: int, in_progress: bool) -> str:
-        ordinal = ORDINALS.get(streak, f"{streak}-й")
-        month_name = MONTH_LOCATIVE[month.month - 1]
-        if in_progress:
-            return (
-                f"{name} зростає {ordinal} місяць поспіль. У {month_name} це вже {format_uah(current)} — "
-                f"на {format_uah(diff)} більше, ніж зазвичай на цю дату."
-            )
-        return (
-            f"{name} зростає {ordinal} місяць поспіль. У {month_name} це {format_uah(current)} — "
-            f"на {format_uah(diff)} більше за ваш звичайний місяць."
+    async def _aggregate(self, period: Period, group_by: list) -> list[dict]:
+        date_from, date_to = self._bounds(period)
+        return await self.repo.aggregate(
+            self.user_id,
+            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self.timezone,
+            group_by=group_by,
+            metrics=["sum", "count"],
         )
 
-    def _daily_cumulative(self, month: date, rows: list[DayRow]) -> list[DailyPoint]:
-        if month > self.current_month:
-            return []
-        last_day = self.today.day if month == self.current_month else calendar.monthrange(month.year, month.month)[1]
-        per_day = defaultdict(int)
-        for row in rows:
-            per_day[row.day] += row.spent
-
-        points = []
-        running = 0
-        for day in range(1, last_day + 1):
-            running += per_day[day]
-            points.append(DailyPoint(date=f"{month_key(month)}-{day:02d}", amount=running))
-        return points
-
-    @staticmethod
-    def _by_category(rows: list[DayRow]) -> list[tuple[CategoryRef, int, int]]:
-        totals: dict[int, list] = {}
-        for row in rows:
-            entry = totals.setdefault(row.category.id, [row.category, 0, 0])
-            entry[1] += row.spent
-            entry[2] += row.count
-        items = [(category, amount, count) for category, amount, count in totals.values() if amount > 0]
+    async def _category_totals(self, period: Period) -> list[tuple[CategoryRef, int, int]]:
+        rows = await self._aggregate(period, ["category"])
+        items = [
+            (CategoryRef(id=row["category_id"], name=row["category_name"], slug=row["category_slug"]), -row["sum"], row["count"])
+            for row in rows
+            if -row["sum"] > 0
+        ]
         items.sort(key=lambda item: (-item[1], item[0].name))
         return items
 
+    async def _category_refs(self, period: Period) -> dict[int, CategoryRef]:
+        return {category.id: category for category, _, _ in await self._category_totals(period)}
+
+    async def _expected_by_category(self, period: Period, comparison: Comparison) -> dict[int, int]:
+        factor = self._scale(period, comparison)
+        return {
+            category.id: round(amount * factor)
+            for category, amount, _ in await self._category_totals(comparison.period)
+        }
+
+    async def _comparison_info(self, period: Period, comparison: Comparison) -> ComparisonInfo:
+        totals = await self._aggregate(comparison.period, [])
+        baseline_total = max(-totals[0]["sum"], 0) if totals else 0
+        history_start = await self._get_history_start()
+        return ComparisonInfo(
+            type=comparison.type,
+            start=comparison.period.start,
+            end=comparison.period.end,
+            days=comparison.period.days,
+            scaled=comparison.scaled,
+            complete=history_start is not None and history_start <= comparison.period.start,
+            total=baseline_total,
+            expected=round(baseline_total * self._scale(period, comparison)),
+        )
+
+    async def _day_rows(self, first_month: date, last_month: date) -> list[DayRow]:
+        date_from, _ = month_bounds(first_month, self.timezone)
+        _, date_to = month_bounds(last_month, self.timezone)
+        rows = await self.repo.aggregate(
+            self.user_id,
+            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self.timezone,
+            group_by=["category", "day"],
+            metrics=["sum"],
+        )
+        return [
+            DayRow(
+                month=row["day"][:7],
+                day=int(row["day"][8:]),
+                category=CategoryRef(id=row["category_id"], name=row["category_name"], slug=row["category_slug"]),
+                spent=-row["sum"],
+            )
+            for row in rows
+        ]
+
+    async def _month_totals(self, window: list[date], rows: list[DayRow]) -> list[MonthTotal]:
+        history_start = await self._get_history_start()
+        history_month = history_start.replace(day=1) if history_start else None
+        totals = []
+        for month in window:
+            has_data = history_month is not None and history_month <= month <= self.current_month
+            complete = has_data and month != self.current_month and not (
+                month == history_month and history_start.day > 1
+            )
+            totals.append(MonthTotal(
+                month=month_key(month), total=self._sum(rows, month_key(month)), has_data=has_data, complete=complete,
+            ))
+        return totals
+
+    async def _get_history_start(self) -> date | None:
+        if not self._history_loaded:
+            first_time = await self.repo.first_transaction_time(self.user_id)
+            if first_time is not None:
+                self._history_start = datetime.fromtimestamp(first_time, ZoneInfo(self.timezone)).date()
+            self._history_loaded = True
+        return self._history_start
+
+    def _bounds(self, period: Period) -> tuple[int, int]:
+        tz = ZoneInfo(self.timezone)
+        start = datetime.combine(period.start, datetime.min.time(), tzinfo=tz)
+        end = datetime.combine(period.end + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+        return int(start.timestamp()), int(end.timestamp())
+
+    def _cap_day(self, month: date) -> int | None:
+        return self.today.day if month == self.current_month else None
+
     @staticmethod
-    def _total(
-        rows: list[DayRow], month: str | None = None, category_id: int | None = None, upto_day: int | None = None,
-    ) -> int:
+    def _scale(period: Period, comparison: Comparison) -> float:
+        return period.days / comparison.period.days if comparison.scaled else 1.0
+
+    @staticmethod
+    def _sum(rows: list[DayRow], month: str, category_id: int | None = None, upto_day: int | None = None) -> int:
         total = sum(
             row.spent for row in rows
-            if (month is None or row.month == month)
+            if row.month == month
             and (category_id is None or row.category.id == category_id)
             and (upto_day is None or row.day <= upto_day)
         )
         return max(total, 0)
 
-    def _cap_day(self, month: date) -> int | None:
-        return self.today.day if month == self.current_month else None
-
-    def _comparison(self, month: date) -> str:
-        return "same_day" if month == self.current_month else "full_month"
+    @staticmethod
+    def _growth_text(
+        name: str, streak: int, month: date, current: int, diff: int, in_progress: bool,
+    ) -> tuple[str, str]:
+        title = f"{name} зростає {ORDINALS.get(streak, f'{streak}-й')} місяць поспіль"
+        month_name = MONTH_LOCATIVE[month.month - 1]
+        if in_progress:
+            text = (
+                f"У {month_name} це вже {format_uah(current)} — "
+                f"на {format_uah(diff)} більше, ніж зазвичай на цю дату."
+            )
+        else:
+            text = f"У {month_name} це {format_uah(current)} — на {format_uah(diff)} більше за ваш звичайний місяць."
+        return title, text
 
     @staticmethod
     def _versus(value: float, baseline: float) -> str:
