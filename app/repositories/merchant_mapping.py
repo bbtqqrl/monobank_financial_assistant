@@ -1,6 +1,7 @@
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.categories import Category
@@ -50,33 +51,26 @@ class MerchantCategoryMappingRepository:
         source: str,
         confidence: float | None = None,
     ) -> MerchantCategoryMapping:
-        result = await self.db.execute(
-            select(MerchantCategoryMapping).where(
-                MerchantCategoryMapping.user_id == user_id,
-                MerchantCategoryMapping.merchant_key == merchant_key,
-                MerchantCategoryMapping.mcc == mcc,
+        statement = (
+            pg_insert(MerchantCategoryMapping)
+            .values(
+                user_id=user_id,
+                merchant_key=merchant_key,
+                mcc=mcc,
+                category_id=category_id,
+                source=source,
+                confidence=confidence,
+                is_active=True,
             )
+            .on_conflict_do_update(
+                constraint="uq_user_merchant_mcc",
+                set_={"category_id": category_id, "source": source, "confidence": confidence, "is_active": True},
+            )
+            .returning(MerchantCategoryMapping)
+            .execution_options(populate_existing=True)
         )
-        mapping = result.scalar_one_or_none()
-
-        if mapping:
-            mapping.category_id = category_id
-            mapping.source = source
-            mapping.confidence = confidence
-            mapping.is_active = True
-            return mapping
-
-        mapping = MerchantCategoryMapping(
-            user_id=user_id,
-            merchant_key=merchant_key,
-            mcc=mcc,
-            category_id=category_id,
-            source=source,
-            confidence=confidence,
-        )
-        self.db.add(mapping)
-        await self.db.flush()
-        return mapping
+        result = await self.db.execute(statement)
+        return result.scalar_one()
 
     @staticmethod
     def update_category(mapping: MerchantCategoryMapping, category_id: int) -> None:
