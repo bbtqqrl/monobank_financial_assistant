@@ -1,32 +1,20 @@
 import { useIsFocused } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
-import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
 
 import { useTheme } from '@/theme';
+import { FlowField, setFlowPalette, type Blob } from '@/ui/FlowField';
 
-// Soft colour fields behind glass cards. Based on the Figma spots, but
-// bigger and overlapping at the top, so while they drift the colours blend
-// into each other (think Revolut's backgrounds); the middle of the screen
-// stays calm for content. A blur filter would be expensive, so each field is
-// a radial gradient with a long soft falloff.
+// Soft colour behind glass cards. Based on the Figma spots: blobs of the tab's
+// colours that wander and melt into each other (see FlowField), busiest at the
+// top, calm in the middle where the content sits.
 //
-// Each tab has its own tint. Switching tints crossfades the layers; fields
-// drift only while visible and not at all with Reduce Motion.
+// Each tab has its own tint. All screens share one palette and one clock, so
+// going from one screen to another the colours morph and the blobs never jump;
+// the colour flows only while visible and not at all with Reduce Motion.
 
 export type BackdropVariant = 'warm' | 'green' | 'accent' | 'none';
 type Tint = Exclude<BackdropVariant, 'none'>;
-
-type Spot = { w: number; h: number; x: number; y: number; color: string; op: number };
 
 const WARM = '#C47C56';
 const TEAL = '#4E8E8E';
@@ -35,134 +23,52 @@ const GREEN = '#3E8A61';
 const VIOLET = '#8A6FC8';
 const SAND = '#B29E7E';
 
-// coordinates in the 390×844 design frame
-function spotsFor(tint: Tint, accent: string): Spot[] {
+const DARK_STRENGTH = 0.78;
+
+// The same palette as flowing blobs: the two tint colours in the top corners,
+// their mix wandering through the middle, sand and a bit of colour at the bottom
+function blobsFor(tint: Tint, accent: string, aspect: number, strength: number): Blob[] {
   const [a, b, mix] =
     tint === 'warm' ? [WARM, TEAL, AMBER] : tint === 'green' ? [GREEN, WARM, TEAL] : [accent, VIOLET, WARM];
+  const k = (op: number) => op * strength;
   return [
-    { w: 560, h: 500, x: -250, y: -250, color: a, op: 0.38 },
-    { w: 500, h: 470, x: 120, y: -190, color: b, op: 0.34 },
-    // wanders between the two top fields and mixes them
-    { w: 420, h: 380, x: -60, y: 90, color: mix, op: 0.2 },
-    { w: 520, h: 360, x: -60, y: 700, color: SAND, op: 0.28 },
+    { color: a, opacity: k(0.62), x: 0.0, y: 0.08, r: 0.7 },
+    { color: b, opacity: k(0.56), x: 1.0, y: 0.22, r: 0.66 },
+    { color: mix, opacity: k(0.34), x: 0.45, y: 0.62, r: 0.52 },
+    { color: SAND, opacity: k(0.4), x: 0.25, y: aspect, r: 0.75 },
+    { color: a, opacity: k(0.22), x: 1.0, y: aspect - 0.4, r: 0.55 },
   ];
 }
 
-const DESIGN_W = 390;
-const DESIGN_H = 844;
-const SOFT = 110;
-const FADE_MS = 700;
-const DARK_STRENGTH = 0.55;
-// x and y run on different periods, so each field wanders along a curve
-// and the four never line up into a visible loop
-const DRIFT = [
-  { dx: 140, dy: 90, xMs: 11000, yMs: 9000, sMs: 13000 },
-  { dx: -130, dy: 110, xMs: 9500, yMs: 12500, sMs: 10000 },
-  { dx: 180, dy: 140, xMs: 14000, yMs: 10500, sMs: 12000 },
-  { dx: -90, dy: 40, xMs: 12000, yMs: 15000, sMs: 11000 },
-];
-
-// top fields stay pinned to the top, the bottom one to the bottom of the screen
-function geometry(s: Spot, width: number, height: number) {
-  const k = width / DESIGN_W;
-  const rx = (s.w / 2) * k;
-  const ry = (s.h / 2) * k;
-  const cx = (s.x + s.w / 2) * k;
-  const cyDesign = (s.y + s.h / 2) * k;
-  const cy = s.y > DESIGN_H / 2 ? height - (DESIGN_H * k - cyDesign) : cyDesign;
-  const r = rx + SOFT;
-  return { cx, cy, rx: r, ry: ry + SOFT, core: Math.max(0, rx - SOFT) / r, edge: rx / r };
-}
-
-type SpotProps = { id: string; spot: Spot; index: number; strength: number; running: boolean };
-
-function SpotView({ id, spot, index, strength, running }: SpotProps) {
-  const { width, height } = useWindowDimensions();
-  const reduceMotion = useReducedMotion();
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
-  const ts = useSharedValue(0);
-  const drift = DRIFT[index % DRIFT.length]!;
-  const g = geometry(spot, width, height);
-  const op = spot.op * strength;
-
-  useEffect(() => {
-    if (!running || reduceMotion) return;
-    const wave = (ms: number) =>
-      withRepeat(withTiming(1, { duration: ms, easing: Easing.inOut(Easing.sin) }), -1, true);
-    tx.set(wave(drift.xMs));
-    ty.set(wave(drift.yMs));
-    ts.set(wave(drift.sMs));
-    return () => {
-      cancelAnimation(tx);
-      cancelAnimation(ty);
-      cancelAnimation(ts);
-    };
-  }, [running, reduceMotion, drift, tx, ty, ts]);
-
-  const style = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: (tx.value - 0.5) * drift.dx },
-      { translateY: (ty.value - 0.5) * drift.dy },
-      { scale: 1 + ts.value * 0.18 },
-    ],
-  }));
-
-  return (
-    <Animated.View
-      style={[{ position: 'absolute', left: g.cx - g.rx, top: g.cy - g.ry, width: g.rx * 2, height: g.ry * 2 }, style]}
-    >
-      <Svg width={g.rx * 2} height={g.ry * 2}>
-        <Defs>
-          <RadialGradient id={id} cx={g.rx} cy={g.ry} rx={g.rx} ry={g.ry} gradientUnits="userSpaceOnUse">
-            <Stop offset={0} stopColor={spot.color} stopOpacity={op} />
-            <Stop offset={g.core} stopColor={spot.color} stopOpacity={op * 0.9} />
-            <Stop offset={g.edge} stopColor={spot.color} stopOpacity={op * 0.45} />
-            <Stop offset={1} stopColor={spot.color} stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
-        <Ellipse cx={g.rx} cy={g.ry} rx={g.rx} ry={g.ry} fill={`url(#${id})`} />
-      </Svg>
-    </Animated.View>
-  );
-}
-
-function Layer({ tint, active, focused }: { tint: Tint; active: boolean; focused: boolean }) {
+// shared: a tab's own screen; the tabs draw one canvas under all of them, so
+// this only steers the colours and stays see-through
+export function Backdrop({ variant, shared = false }: { variant: BackdropVariant; shared?: boolean }) {
   const { c, dark } = useTheme();
-  const shown = useSharedValue(0);
-
-  useEffect(() => {
-    shown.set(withTiming(active ? 1 : 0, { duration: FADE_MS, easing: Easing.inOut(Easing.cubic) }));
-  }, [active, shown]);
-
-  // the incoming tint also "breathes in" a little
-  const style = useAnimatedStyle(() => ({
-    opacity: shown.value,
-    transform: [{ scale: 0.96 + shown.value * 0.04 }],
-  }));
-
-  return (
-    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, style]}>
-      {spotsFor(tint, c.accent).map((spot, i) => (
-        <SpotView key={i} id={`${tint}${i}`} spot={spot} index={i} strength={dark ? DARK_STRENGTH : 1} running={active && focused} />
-      ))}
-    </Animated.View>
-  );
-}
-
-export function Backdrop({ variant }: { variant: BackdropVariant }) {
-  const { c } = useTheme();
+  const { width, height } = useWindowDimensions();
   // screens stay mounted in tabs and stacks, no point animating the hidden ones
   const focused = useIsFocused();
-  // layers mount the first time their tint is needed and stay for crossfades
-  const [mounted, setMounted] = useState<Tint[]>([]);
-  if (variant !== 'none' && !mounted.includes(variant)) setMounted([...mounted, variant]);
 
+  // The shared palette moves to this screen's colours when it comes into view.
+  // A screen with its own canvas shown before keeps its last picture while
+  // hidden and shows it for a frame on return, so there the colours switch at
+  // once instead of morphing from the previous screen's and blinking.
+  const shownBefore = useRef(false);
+  useEffect(() => {
+    if (!focused || variant === 'none') return;
+    setFlowPalette(
+      c.bg,
+      blobsFor(variant, c.accent, height / width, dark ? DARK_STRENGTH : 1),
+      shared || !shownBefore.current,
+    );
+    shownBefore.current = true;
+  }, [focused, variant, shared, c.bg, c.accent, dark, width, height]);
+
+  if (shared && variant !== 'none') return null;
+  if (variant === 'none')
+    return <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: c.bg }]} />;
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: c.bg }]}>
-      {mounted.map((tint) => (
-        <Layer key={tint} tint={tint} active={tint === variant} focused={focused} />
-      ))}
+      <FlowField running={focused} />
     </View>
   );
 }

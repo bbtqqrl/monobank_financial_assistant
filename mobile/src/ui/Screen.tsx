@@ -10,6 +10,8 @@ import { ScrollBackdrop } from '@/ui/ScrollBackdrop';
 
 type Props = {
   background?: BackdropVariant;
+  // a tab's own screen: the tabs' shared canvas shows through
+  tab?: boolean;
   // space between blocks, 9 on most screens
   gap?: number;
   // pull to refresh, from usePullRefresh
@@ -18,7 +20,7 @@ type Props = {
 };
 
 // (Figma: content starts at 58 under a 47pt status bar).
-export function Screen({ background = 'warm', gap = 9, pull, children }: Props) {
+export function Screen({ background = 'warm', tab = false, gap = 9, pull, children }: Props) {
   const insets = useSafeAreaInsets();
   const top = 11 + (Platform.OS === 'android' ? insets.top : 0);
   const bottom = 24 + (Platform.OS === 'android' ? insets.bottom : 0);
@@ -36,7 +38,7 @@ export function Screen({ background = 'warm', gap = 9, pull, children }: Props) 
         contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: bottom, gap }]}
         refreshControl={pull && Platform.OS === 'android' ? <PullRefreshControl pull={pull} /> : undefined}
       >
-        <ScrollBackdrop variant={background} offset={offset} />
+        <ScrollBackdrop variant={background} shared={tab} offset={offset} />
         {pull ? <PullIndicator offset={offset} rest={rest} top={insets.top + 8} /> : null}
         {children}
       </Animated.ScrollView>

@@ -39,7 +39,7 @@ export default function BudgetsScreen() {
   const over = list.filter((b) => budgetRatio(b) > 1);
 
   return (
-    <Screen background="green" pull={pull}>
+    <Screen background="green" tab pull={pull}>
       <Header
         title="Бюджети"
         status={pull.status}

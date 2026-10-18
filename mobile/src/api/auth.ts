@@ -44,6 +44,12 @@ export async function register(email: string, password: string) {
   await saveTokens(tokens);
 }
 
+// every device's session ends on the server, then this one's locally
+export async function signOutEverywhere() {
+  await request('/auth/logout-all', { method: 'POST' });
+  await setTokens(null).catch(() => {});
+}
+
 // local first, the server revoke is best effort
 export async function signOut() {
   const refresh = getTokens()?.refresh;
