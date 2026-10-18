@@ -25,6 +25,7 @@ if SENTRY_DSN:
     )
 
 from app.api.accounts import router as accounts_router
+from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
 from app.api.budgets import router as budgets_router
 from app.api.categories import router as categories_router
@@ -66,6 +67,7 @@ app.include_router(transactions_router)
 app.include_router(merchant_mappings_router)
 app.include_router(budgets_router)
 app.include_router(categories_router)
+app.include_router(analytics_router)
 
 
 if __name__ == '__main__':
