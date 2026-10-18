@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import SessionLocal
@@ -16,7 +17,9 @@ from app.services.categorization_service import CategorizationAIError, Categoriz
 
 logger = logging.getLogger(__name__)
 
-BACKFILL_DAYS = 30
+# TODO: глибина історії має залежати від плану користувача (free — місяць, pro — рік)
+BACKFILL_DAYS = 183
+STATEMENT_WINDOW_SECONDS = 31 * 86400
 STATEMENT_RATE_LIMIT_SECONDS = 60
 # Monobank returns at most this many items per statement request, newest
 # first; a full page means there's more to fetch further back.
@@ -52,57 +55,92 @@ class StatementBackfillService:
         self._ai_semaphore = asyncio.Semaphore(AI_CONCURRENCY)
 
     async def backfill(self, user_id: int, token: str, catch_up: bool = False) -> None:
-        accounts = [
-            a for a in await self.accounts.list_for_user(user_id)
-            if a.is_active and (catch_up or a.statement_backfilled_at is None)
-        ]
-        jars = [
-            j for j in await self.jars.list_for_user(user_id)
-            if j.is_active and (catch_up or j.statement_backfilled_at is None)
-        ]
-        if not accounts and not jars:
-            return
-
         to_ts = int(datetime.now(timezone.utc).timestamp())
         oldest_ts = to_ts - BACKFILL_DAYS * 86400
+
+        holders = [
+            (account, self.accounts, account.mono_account_id, account.id, None, account.currency_code)
+            for account in await self.accounts.list_for_user(user_id)
+            if account.is_active and self._needs_backfill(account, catch_up, oldest_ts)
+        ] + [
+            (jar, self.jars, jar.mono_jar_id, None, jar.id, jar.currency_code)
+            for jar in await self.jars.list_for_user(user_id)
+            if jar.is_active and self._needs_backfill(jar, catch_up, oldest_ts)
+        ]
+        if not holders:
+            return
 
         # Each account's transactions are categorized as soon as they're
         # stored, overlapping with the rate-limit wait before the next account,
         # rather than all at the end where a crash would lose the lot.
         categorization_tasks: list[asyncio.Task] = []
         try:
-            for account in accounts:
-                from_ts = await self._from_ts(account.id, None, account.statement_backfilled_at, oldest_ts)
-                created_ids = await self._fetch_and_store(
-                    user_id, token, account.mono_account_id, from_ts, to_ts,
-                    account_id=account.id, jar_id=None, currency=account.currency_code,
+            for holder, repository, mono_id, account_id, jar_id, currency in holders:
+                created_ids, covered_from, ok = await self._backfill_holder(
+                    user_id, token, holder, mono_id, account_id, jar_id, currency, oldest_ts, to_ts, catch_up,
                 )
-                if created_ids is not None:
-                    self.accounts.mark_backfilled(account, datetime.now(timezone.utc))
-                    await self.db.commit()
-                    categorization_tasks.append(asyncio.create_task(self._categorize_all(created_ids)))
-
-            for jar in jars:
-                from_ts = await self._from_ts(None, jar.id, jar.statement_backfilled_at, oldest_ts)
-                created_ids = await self._fetch_and_store(
-                    user_id, token, jar.mono_jar_id, from_ts, to_ts,
-                    account_id=None, jar_id=jar.id, currency=jar.currency_code,
-                )
-                if created_ids is not None:
-                    self.jars.mark_backfilled(jar, datetime.now(timezone.utc))
-                    await self.db.commit()
+                if ok:
+                    repository.mark_backfilled(holder, datetime.now(timezone.utc), covered_from)
+                await self.db.commit()
+                if created_ids:
                     categorization_tasks.append(asyncio.create_task(self._categorize_all(created_ids)))
         finally:
             await self.api.close()
             await asyncio.gather(*categorization_tasks)
 
-    async def _from_ts(
-        self, account_id: int | None, jar_id: int | None, backfilled_at: datetime | None, oldest_ts: int,
-    ) -> int:
-        if backfilled_at is None:
-            return oldest_ts
-        anchor = await self.transactions.last_mono_time(account_id, jar_id) or int(backfilled_at.timestamp())
-        return max(anchor - CATCH_UP_OVERLAP_SECONDS, oldest_ts)
+    @staticmethod
+    def _needs_backfill(holder, catch_up: bool, oldest_ts: int) -> bool:
+        if catch_up or holder.statement_backfilled_at is None:
+            return True
+        return holder.statement_backfilled_from is None or holder.statement_backfilled_from > oldest_ts
+
+    async def _backfill_holder(
+        self,
+        user_id: int,
+        token: str,
+        holder,
+        mono_id: str,
+        account_id: int | None,
+        jar_id: int | None,
+        currency: int,
+        oldest_ts: int,
+        to_ts: int,
+        catch_up: bool,
+    ) -> tuple[list[int], int | None, bool]:
+        covered_from = holder.statement_backfilled_from
+        ranges: list[tuple[int, int, bool]] = []
+
+        if holder.statement_backfilled_at is None:
+            ranges.append((oldest_ts, to_ts, True))
+        else:
+            backfilled_at_ts = int(holder.statement_backfilled_at.timestamp())
+            if catch_up:
+                anchor = await self.transactions.last_mono_time(account_id, jar_id) or backfilled_at_ts
+                ranges.append((max(anchor - CATCH_UP_OVERLAP_SECONDS, oldest_ts), to_ts, False))
+            if covered_from is None or covered_from > oldest_ts:
+                upper = covered_from or await self.transactions.first_mono_time(account_id, jar_id) or backfilled_at_ts
+                if upper > oldest_ts:
+                    ranges.append((oldest_ts, upper + CATCH_UP_OVERLAP_SECONDS, True))
+                else:
+                    covered_from = oldest_ts
+
+        created_ids: list[int] = []
+        for from_ts, range_to, deepens in ranges:
+            ids, reached = await self._fetch_range(
+                user_id, token, mono_id, from_ts, range_to, account_id, jar_id, currency,
+            )
+            created_ids += ids
+            if reached is None:
+                return created_ids, covered_from, False
+            if deepens:
+                covered_from = reached
+
+        logger.info(
+            "Backfilled %s new transactions for mono_id=%s user_id=%s, history from %s",
+            len(created_ids), mono_id, user_id,
+            datetime.fromtimestamp(covered_from, timezone.utc).date() if covered_from else None,
+        )
+        return created_ids, covered_from, True
 
     async def _get_statement(self, token: str, mono_id: str, from_ts: int, to_ts: int) -> list[dict]:
         """Monobank allows one statement request per 60s per token, across
@@ -117,7 +155,7 @@ class StatementBackfillService:
         finally:
             self._last_statement_call = time.monotonic()
 
-    async def _fetch_and_store(
+    async def _fetch_range(
         self,
         user_id: int,
         token: str,
@@ -127,22 +165,48 @@ class StatementBackfillService:
         account_id: int | None,
         jar_id: int | None,
         currency: int,
-    ) -> list[int] | None:
-        """Returns ids of newly stored transactions, or None if any page
-        failed to download (the account then stays pending and is retried on
-        the next startup; what was stored so far is kept and deduplicated)."""
+    ) -> tuple[list[int], int | None]:
+        created_ids: list[int] = []
+        window_to = to_ts
+        while window_to > from_ts:
+            window_from = max(from_ts, window_to - STATEMENT_WINDOW_SECONDS)
+            try:
+                created_ids += await self._fetch_window(
+                    user_id, token, mono_id, window_from, window_to, account_id, jar_id, currency,
+                )
+            except httpx.HTTPStatusError as e:
+                await self.db.commit()
+                if e.response.status_code == 400:
+                    logger.warning(
+                        "Monobank refused statement for mono_id=%s before %s: %s",
+                        mono_id, datetime.fromtimestamp(window_to, timezone.utc).date(), e.response.text[:300],
+                    )
+                    return created_ids, from_ts
+                logger.exception("Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id)
+                return created_ids, None
+            except Exception:
+                await self.db.commit()
+                logger.exception("Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id)
+                return created_ids, None
+            window_to = window_from
+        return created_ids, from_ts
+
+    async def _fetch_window(
+        self,
+        user_id: int,
+        token: str,
+        mono_id: str,
+        from_ts: int,
+        to_ts: int,
+        account_id: int | None,
+        jar_id: int | None,
+        currency: int,
+    ) -> list[int]:
         created_ids: list[int] = []
         page_to = to_ts
 
         while True:
-            try:
-                items = await self._get_statement(token, mono_id, from_ts, page_to)
-            except Exception:
-                logger.exception(
-                    "Statement backfill request failed for mono_id=%s user_id=%s", mono_id, user_id,
-                )
-                await self.db.commit()
-                return None
+            items = await self._get_statement(token, mono_id, from_ts, page_to)
 
             for raw in items:
                 transaction = MonoTransactionSchema.model_validate(raw)
@@ -155,7 +219,7 @@ class StatementBackfillService:
             await self.db.commit()
 
             if len(items) < STATEMENT_PAGE_SIZE:
-                break
+                return created_ids
 
             # Items sharing the oldest second may straddle the page boundary,
             # so the next page includes that second again; duplicates are
@@ -164,12 +228,7 @@ class StatementBackfillService:
             oldest = min(item["time"] for item in items)
             page_to = oldest if oldest < page_to else page_to - 1
             if page_to <= from_ts:
-                break
-
-        logger.info(
-            "Backfilled %s new transactions for mono_id=%s user_id=%s", len(created_ids), mono_id, user_id,
-        )
-        return created_ids
+                return created_ids
 
     async def _categorize_all(self, transaction_ids: list[int]) -> None:
         async def _categorize_one(transaction_id: int) -> None:

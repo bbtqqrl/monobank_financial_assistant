@@ -39,8 +39,9 @@ class JarRepository:
         return list(result.scalars().all())
 
     @staticmethod
-    def mark_backfilled(jar: MonoJar, when: datetime) -> None:
+    def mark_backfilled(jar: MonoJar, when: datetime, from_ts: int | None) -> None:
         jar.statement_backfilled_at = when
+        jar.statement_backfilled_from = from_ts
 
     async def create(self, user: User, jar: dict) -> None:
         self.db.add(

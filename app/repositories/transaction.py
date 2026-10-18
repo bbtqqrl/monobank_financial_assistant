@@ -288,6 +288,16 @@ class TransactionRepository:
         )
         return list(result.all())
 
+    async def first_mono_time(self, account_id: int | None, jar_id: int | None) -> int | None:
+        result = await self.db.execute(
+            select(func.min(TransactionRaw.time)).where(
+                TransactionRaw.source == "monobank",
+                TransactionRaw.account_id.is_not_distinct_from(account_id),
+                TransactionRaw.jar_id.is_not_distinct_from(jar_id),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def last_mono_time(self, account_id: int | None, jar_id: int | None) -> int | None:
         result = await self.db.execute(
             select(func.max(TransactionRaw.time)).where(

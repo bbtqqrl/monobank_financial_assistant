@@ -29,6 +29,7 @@ class MonoJar(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
 
     statement_backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    statement_backfilled_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     user: Mapped["User"] = relationship(
         back_populates="jars",

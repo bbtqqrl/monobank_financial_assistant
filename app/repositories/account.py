@@ -44,8 +44,9 @@ class AccountRepository:
         return list(result.scalars().all())
 
     @staticmethod
-    def mark_backfilled(account: MonoAccount, when: datetime) -> None:
+    def mark_backfilled(account: MonoAccount, when: datetime, from_ts: int | None) -> None:
         account.statement_backfilled_at = when
+        account.statement_backfilled_from = from_ts
 
     async def create(self, user: User, acc: dict) -> None:
         self.db.add(

@@ -40,6 +40,7 @@ class MonoAccount(Base):
     # completed, so a restart mid-backfill can resume instead of starting
     # over (see StatementBackfillService).
     statement_backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    statement_backfilled_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     user: Mapped["User"] = relationship(
         back_populates="accounts",
