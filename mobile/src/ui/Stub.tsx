@@ -21,7 +21,8 @@ export function Stub({ note, links = [], background = 'warm', ...header }: Props
 
   return (
     <View style={styles.screen}>
-      <Backdrop variant={background} />
+      {/* stubs are the not-yet-built tabs, on the tabs' shared canvas */}
+      <Backdrop variant={background} shared />
       {/* Figma: header at 58 under a 47pt status bar */}
       <View style={[styles.top, { paddingTop: insets.top + 11 }]}>
         <Header {...header} />

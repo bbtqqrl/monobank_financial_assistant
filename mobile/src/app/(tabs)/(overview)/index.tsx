@@ -62,7 +62,7 @@ export default function OverviewScreen() {
 
   // TODO: background="none" again once the map backdrop is in
   return (
-    <Screen background="warm" pull={pull}>
+    <Screen background="warm" tab pull={pull}>
       <Header
         title="Огляд"
         status={pull.status}

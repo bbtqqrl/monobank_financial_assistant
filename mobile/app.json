@@ -47,6 +47,12 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Щоб Фінтрекер відкривався лише тобі"
+        }
+      ],
       "expo-localization",
       "./plugins/withSceneLifecycle"
     ],

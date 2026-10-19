@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
 import { signOut } from '@/api/auth';
 import { goBack } from '@/lib/nav';
+import { lockEnabled } from '@/lib/security';
 import { useTheme } from '@/theme';
 import { THEME_LABELS, useThemePref } from '@/theme/preference';
 import { Glass } from '@/ui/Glass';
@@ -17,6 +18,7 @@ import { Text } from '@/ui/Text';
 export default function ProfileScreen() {
   const { c } = useTheme();
   const theme = useThemePref();
+  const lock = lockEnabled.useValue();
   const [busy, setBusy] = useState(false);
 
   return (
@@ -32,6 +34,12 @@ export default function ProfileScreen() {
       <Glass contentStyle={styles.settings}>
         <SettingRow icon="sun" label="Тема" value={THEME_LABELS[theme]} onPress={() => router.push('/theme')} />
         <SettingRow icon="card" label="Картки" value="Порядок" onPress={() => router.push('/cards')} />
+        <SettingRow
+          icon="lock"
+          label="Безпека"
+          value={lock ? 'Код' : undefined}
+          onPress={() => router.push('/security')}
+        />
       </Glass>
 
       <Pressable

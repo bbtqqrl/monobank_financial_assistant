@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'mobile/**'
 
 concurrency:
   group: deploy-production
@@ -31,8 +33,12 @@ jobs:
             set -e
             cd ~/monobank_financial_assistant
 
+            git config core.sparseCheckout true
+            printf '/*\n!/mobile/\n' > .git/info/sparse-checkout
+
             git fetch origin main
             git reset --hard origin/main
+            git read-tree -mu HEAD
 
             docker compose build api                             
             docker compose up -d db                              

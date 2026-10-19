@@ -13,8 +13,10 @@ import { queryClient } from '@/api/query';
 import { loadTokens } from '@/api/tokens';
 import { loadCardPrefs } from '@/lib/cardOrder';
 import { FONT_FILES } from '@/lib/fonts';
+import { loadSecurityPrefs } from '@/lib/security';
 import { useTheme, withAlpha } from '@/theme';
 import { loadThemePref } from '@/theme/preference';
+import { AppLock } from '@/ui/AppLock';
 
 // keep the splash until fonts, saved settings and the saved session are ready
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -28,7 +30,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     loadTokens();
-    Promise.all([loadThemePref(), loadCardPrefs()]).finally(() => setSettingsLoaded(true));
+    Promise.all([loadThemePref(), loadCardPrefs(), loadSecurityPrefs()]).finally(() => setSettingsLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -71,6 +73,8 @@ export default function RootLayout() {
             <Stack.Protected guard={signedIn}>
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="profile" />
+              <Stack.Screen name="security" />
+              <Stack.Screen name="pin" />
               <Stack.Screen name="transaction/[id]/index" />
               <Stack.Screen name="transaction/[id]/category" options={sheet([0.75, 1])} />
               <Stack.Screen name="new/index" options={sheet([1])} />
@@ -89,6 +93,7 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
             </Stack.Protected>
           </Stack>
+          {signedIn ? <AppLock /> : null}
         </QueryClientProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

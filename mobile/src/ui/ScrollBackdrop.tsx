@@ -5,6 +5,8 @@ import { Backdrop, type BackdropVariant } from '@/ui/Backdrop';
 
 type Props = {
   variant: BackdropVariant;
+  // a tab's own screen, see Backdrop
+  shared?: boolean;
   // the scroll view's contentOffset.y
   offset: SharedValue<number>;
   // to cancel the padding of whatever it's placed in
@@ -15,13 +17,13 @@ type Props = {
 // view's first child: with the backdrop in front of the ScrollView it finds
 // nothing, so the bar doesn't minimise and the iOS 26 edge blur is missing.
 // So the backdrop sits inside the scroll content and moves against the scroll.
-export function ScrollBackdrop({ variant, offset, style }: Props) {
+export function ScrollBackdrop({ variant, shared, offset, style }: Props) {
   const { width, height } = useWindowDimensions();
   const pinned = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
 
   return (
     <Animated.View pointerEvents="none" style={[styles.fill, { width, height }, style, pinned]}>
-      <Backdrop variant={variant} />
+      <Backdrop variant={variant} shared={shared} />
     </Animated.View>
   );
 }
