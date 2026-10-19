@@ -1,13 +1,19 @@
 {
   "expo": {
-    "name": "Фінтрекер",
-    "slug": "fintracker",
-    "scheme": "fintracker",
+    "name": "blink",
+    "slug": "blink",
+    "scheme": "blink",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "bundleIdentifier": "com.fintracker.app",
+      "bundleIdentifier": "app.blinkfinance",
+      "appleTeamId": "9BUC27YL7Y",
+      "buildNumber": "1",
+      "icon": "./assets/blink.icon",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "supportsTablet": false,
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true,
@@ -19,7 +25,7 @@
       }
     },
     "android": {
-      "package": "com.fintracker.app",
+      "package": "app.blinkfinance",
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
@@ -50,7 +56,7 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Щоб Фінтрекер відкривався лише тобі"
+          "faceIDPermission": "Щоб blink відкривався лише тобі"
         }
       ],
       "expo-localization",

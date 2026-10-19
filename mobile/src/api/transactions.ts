@@ -69,6 +69,8 @@ export type TxFilters = {
   from?: string;
   to?: string;
   category?: number;
+  // a monobank jar's own deposits and withdrawals
+  jar?: number;
 };
 
 function shiftDay(day: string, by: number) {
@@ -78,11 +80,12 @@ function shiftDay(day: string, by: number) {
 
 // The backend reads from/to as Kyiv days, so it's asked for a day more on
 // each side and the edges are cut here by the phone's own clock.
-function listUrl({ type, search, from, to, category }: TxFilters, limit: number, page = 1) {
+function listUrl({ type, search, from, to, category, jar }: TxFilters, limit: number, page = 1) {
   const params = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (type) params.set('type', type);
   if (search) params.set('search', search);
   if (category !== undefined) params.set('category_id', String(category));
+  if (jar !== undefined) params.set('jar_id', String(jar));
   if (from) params.set('from', shiftDay(from, -1));
   if (to) params.set('to', shiftDay(to, 1));
   return `/transactions?${params}`;
