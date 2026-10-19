@@ -5,6 +5,7 @@ import type { Flash } from '@/lib/useFlash';
 
 import { AccountSchema } from './accounts';
 import { api } from './client';
+import { JARS_KEY, JarSchema, type Jar } from './jars';
 
 // The backend re-reads cards and balances from monobank with the stored token.
 // Webhooks only bring transactions, so balances go stale without this.
@@ -12,6 +13,7 @@ const SYNC_PATH = '/monobank/debug/client-info';
 
 const SyncSchema = z.object({
   accounts: z.array(AccountSchema),
+  jars: z.array(JarSchema).default([]),
   // false when monobank sends new transactions somewhere else or nowhere
   webhook_registered: z.boolean(),
 });
@@ -27,11 +29,31 @@ const statusQuery = (qc: QueryClient) => ({
   queryFn: async (): Promise<MonobankStatus> => {
     const data = await api(SyncSchema, SYNC_PATH, { method: 'POST' });
     qc.setQueryData(['accounts'], data.accounts);
+    qc.setQueryData(JARS_KEY, data.jars);
     return { live: data.webhook_registered };
   },
   staleTime: MIN_INTERVAL_MS,
   retry: false,
 });
+
+// cards, balances and jars fresh from monobank, or as synced under a minute ago
+export function syncMonobank(qc: QueryClient) {
+  return qc.fetchQuery(statusQuery(qc));
+}
+
+// The backend has no list of jars of its own yet: they come with the sync,
+// which puts them in the cache under JARS_KEY
+export function useJars(enabled: boolean) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: JARS_KEY,
+    queryFn: async () => {
+      await syncMonobank(qc);
+      return qc.getQueryData<Jar[]>(JARS_KEY) ?? [];
+    },
+    enabled,
+  });
+}
 
 // Whether new transactions arrive on their own. Checking it syncs the balances too.
 export function useMonobankStatus(enabled: boolean) {

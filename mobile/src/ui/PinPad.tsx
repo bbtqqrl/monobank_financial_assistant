@@ -17,7 +17,8 @@ import { Icon, type IconName } from '@/ui/icons/Icon';
 import { Text } from '@/ui/Text';
 
 type Props = {
-  title: string;
+  // none on the lock screen: the avatar and the dots say enough
+  title?: string;
   // under the title; an error takes its place in red
   hint?: string;
   error?: string | null;
@@ -43,6 +44,8 @@ const SPRING = { damping: 14, stiffness: 320 };
 const SETTLE_MS = 140;
 // how long a wrong code stays on the dots in red
 const WRONG_HOLD_MS = 420;
+// a wrong code's dots fade out in red too
+const WRONG_FADE_MS = 260;
 const TONE_MS = 160;
 
 // A round glass key that sinks a little under the finger
@@ -100,7 +103,7 @@ function Dot({ filled, tone }: { filled: boolean; tone: Tone }) {
   const { c } = useTheme();
   const fill = useSharedValue(filled ? 1 : 0);
   // a wrong code fades out slower, so the red is seen going
-  const out = tone === 'error' ? 260 : 110;
+  const out = tone === 'error' ? WRONG_FADE_MS : 110;
   useEffect(() => {
     fill.set(withTiming(filled ? 1 : 0, { duration: filled ? 140 : out, easing: Easing.out(Easing.cubic) }));
   }, [filled, fill, out]);
@@ -148,6 +151,8 @@ export function PinPad({ title, hint, error, done = false, disabled = false, onC
   // functional updates: quick taps between renders all count
   const press = (digit: string) => {
     tap();
+    // typing again right after a wrong code: the new dots are plain ones
+    if (code.length < PIN_LENGTH) setWrong(false);
     setCode((now) => (now.length >= PIN_LENGTH ? now : now + digit));
   };
 
@@ -173,10 +178,7 @@ export function PinPad({ title, hint, error, done = false, disabled = false, onC
         return;
       }
       setWrong(true);
-      hold = setTimeout(() => {
-        setWrong(false);
-        setCode('');
-      }, WRONG_HOLD_MS);
+      hold = setTimeout(() => setCode(''), WRONG_HOLD_MS);
     }, SETTLE_MS);
     return () => {
       alive = false;
@@ -185,15 +187,24 @@ export function PinPad({ title, hint, error, done = false, disabled = false, onC
     };
   }, [code]);
 
+  // the red goes once the dots have faded, or as soon as typing starts again
+  useEffect(() => {
+    if (!wrong || code.length > 0) return;
+    const t = setTimeout(() => setWrong(false), WRONG_FADE_MS);
+    return () => clearTimeout(t);
+  }, [wrong, code]);
+
   const tone: Tone = done ? 'done' : wrong || failed ? 'error' : 'idle';
 
   return (
     <View style={styles.pad}>
       <View style={styles.head}>
         {mark}
-        <Text variant="screenTitle" style={styles.title}>
-          {title}
-        </Text>
+        {title ? (
+          <Text variant="screenTitle" style={styles.title}>
+            {title}
+          </Text>
+        ) : null}
         <Text variant="rowCaption" tone={failed ? 'danger' : 'faint'} style={styles.hint}>
           {(failed ? error : hint) ?? ' '}
         </Text>

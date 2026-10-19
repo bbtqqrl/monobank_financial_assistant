@@ -56,7 +56,6 @@ function LockScreen() {
   const insets = useSafeAreaInsets();
   const biometry = useBiometry();
   const useFace = biometricEnabled.useValue() && !!biometry?.available;
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const rest = useRestLeft();
 
@@ -91,7 +90,6 @@ function LockScreen() {
       return true;
     }
     failure();
-    setError(result === 'resting' ? null : 'Неправильний код');
     return false;
   };
 
@@ -106,11 +104,9 @@ function LockScreen() {
       <PinBackdrop />
       <View style={styles.middle}>
         <PinPad
-          title="Введи код"
           mark={<PinMark />}
           done={done}
           hint={rest ? `Забагато спроб, зачекай ${rest} с` : undefined}
-          error={rest ? null : error}
           disabled={rest > 0}
           onComplete={enter}
           extra={

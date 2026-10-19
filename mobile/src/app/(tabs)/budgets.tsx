@@ -13,6 +13,7 @@ import { EmptyState } from '@/ui/EmptyState';
 import { Glass } from '@/ui/Glass';
 import { Header } from '@/ui/Header';
 import { Icon } from '@/ui/icons/Icon';
+import { JarsCard } from '@/ui/JarsCard';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
 
@@ -97,6 +98,9 @@ export default function BudgetsScreen() {
           </Glass>
         </>
       )}
+
+      {/* jars come from monobank, so they show whatever the budgets are doing */}
+      <JarsCard />
     </Screen>
   );
 }
