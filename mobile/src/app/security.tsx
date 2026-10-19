@@ -51,7 +51,7 @@ export default function SecurityScreen() {
       setBiometricEnabled(false);
       return;
     }
-    if (await authenticate(`Відкривати Фінтрекер через ${name}`)) {
+    if (await authenticate(`Відкривати blink через ${name}`)) {
       setBiometricEnabled(true);
       success();
     }

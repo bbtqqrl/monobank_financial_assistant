@@ -68,7 +68,7 @@ function LockScreen() {
   useEffect(() => {
     if (!useFace) return;
     const tryFace = async () => {
-      if (await authenticate('Розблокувати Фінтрекер')) {
+      if (await authenticate('Розблокувати blink')) {
         settle();
         locked.set(false);
       }
@@ -115,7 +115,7 @@ function LockScreen() {
                   icon: 'faceid',
                   label: biometry?.name ?? 'Face ID',
                   onPress: async () => {
-                    if (await authenticate('Розблокувати Фінтрекер')) open();
+                    if (await authenticate('Розблокувати blink')) open();
                   },
                 }
               : undefined
