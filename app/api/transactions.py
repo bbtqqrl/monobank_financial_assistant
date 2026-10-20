@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -6,12 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.currencies import UAH
 from app.db.models.user import User
 from app.db.session import get_db
-from app.repositories.account import AccountRepository
-from app.repositories.category import CategoryRepository
-from app.repositories.jar import JarRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.transaction import (
     CategoryBrief,
@@ -26,8 +22,8 @@ from app.services.categorization_service import (
     CategorizationService,
     CategoryDirectionError,
     NotManualTransactionError,
-    check_category_fits_amount,
 )
+from app.services.transaction_service import TransactionService
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -104,55 +100,18 @@ async def create_transaction(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if data.account_id is not None and data.jar_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A transaction can belong to an account or a jar, not both",
-        )
-
-    holder_currency = None
-
-    if data.account_id is not None:
-        account = await AccountRepository(db).get_by_id_for_user(data.account_id, current_user.id)
-        if account is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-        holder_currency = account.currency_code
-
-    if data.jar_id is not None:
-        jar = await JarRepository(db).get_by_id_for_user(data.jar_id, current_user.id)
-        if jar is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jar not found")
-        holder_currency = jar.currency_code
-
-    if holder_currency is not None and data.currency_code not in (None, holder_currency):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"currency_code must match the account's currency ({holder_currency})",
-        )
-    currency_code = holder_currency or data.currency_code or UAH
-
-    category = await CategoryRepository(db).get_selectable_by_id(data.category_id)
-    if category is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category not found or not selectable")
-    try:
-        check_category_fits_amount(category.kind, data.amount)
-    except CategoryDirectionError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    transactions = TransactionRepository(db)
-    transaction = await transactions.create_manual(
-        user_id=current_user.id,
-        account_id=data.account_id,
-        jar_id=data.jar_id,
+    transaction = await TransactionService(db, current_user.id).create_manual(
         description=data.description,
         amount=data.amount,
-        currency_code=currency_code,
-        time=data.time if data.time is not None else int(datetime.now(timezone.utc).timestamp()),
+        category_id=data.category_id,
+        account_id=data.account_id,
+        jar_id=data.jar_id,
+        currency_code=data.currency_code,
+        time=data.time,
         comment=data.comment,
-        category_id=category.id,
     )
-    await db.commit()
 
+    transactions = TransactionRepository(db)
     row = await transactions.get_detail_for_user(transaction.id, current_user.id)
     transaction, category, account_currency_code = row
 
