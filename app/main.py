@@ -33,6 +33,7 @@ from app.api.merchant_mappings import router as merchant_mappings_router
 from app.api.transactions import router as transactions_router
 from app.api.user_connect import router as monobank_router
 from app.api.webhook import router as webhook_router
+from app.services.errors import ServiceError
 from app.services.categorization_sweeper import run_sweeper_forever
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(ServiceError)
+async def service_error(request: Request, exc: ServiceError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
 @app.exception_handler(DBAPIError)
