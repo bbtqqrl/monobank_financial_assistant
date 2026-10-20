@@ -7,3 +7,7 @@ from app.db.models.mono_jars import MonoJar
 from app.db.models.mcc_codes import MccCode
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.budget import Budget
+from app.db.models.conversation import Conversation
+from app.db.models.message import Message
+from app.db.models.pending_action import PendingAction
+from app.db.models.llm_usage import LLMUsage
