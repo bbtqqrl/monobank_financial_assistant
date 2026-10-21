@@ -71,6 +71,11 @@ export function BalanceCard({
     <Pressable
       onLongPress={onLongPress}
       delayLongPress={380}
+      // VoiceOver can't hold, so the hold is offered as an action
+      accessibilityActions={onLongPress ? [{ name: 'longpress', label: 'Порядок карток' }] : undefined}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
       style={({ pressed }) => [pressed && onLongPress && styles.held, style]}
     >
       {/* The shadow comes from a plate of the card's own colour a hair smaller
@@ -165,7 +170,7 @@ const styles = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 20 },
   label: { letterSpacing: 0.69 },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  badgeText: { fontSize: 11.5, letterSpacing: 0.6, fontVariant: ['tabular-nums'] },
+  badgeText: { fontSize: 12, letterSpacing: 0.6, fontVariant: ['tabular-nums'] },
   // the balance is the card's one big thing
   amount: { ...TEXT.amountXl, fontSize: 32, lineHeight: 38, letterSpacing: -0.8 },
   dots: { letterSpacing: -2 },

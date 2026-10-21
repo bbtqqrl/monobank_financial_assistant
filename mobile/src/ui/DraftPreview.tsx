@@ -17,6 +17,7 @@ import { useTheme, withAlpha } from '@/theme';
 import { AmountDigits } from '@/ui/AmountDigits';
 import { CategoryChip } from '@/ui/CategoryChip';
 import { Glass } from '@/ui/Glass';
+import { KEYBOARD_DONE_ID, KeyboardDone } from '@/ui/KeyboardDone';
 import { Segmented } from '@/ui/Segmented';
 import { Text } from '@/ui/Text';
 
@@ -66,7 +67,7 @@ export function DraftPreview({
     tone.set(withTiming(income ? 1 : 0, { duration: 200 }));
   }, [income, tone]);
   const amountTone = useAnimatedStyle(() => ({
-    color: interpolateColor(tone.get(), [0, 1], [c.ink, c.category.green]),
+    color: interpolateColor(tone.get(), [0, 1], [c.ink, c.positive]),
   }));
 
   return (
@@ -125,12 +126,15 @@ export function DraftPreview({
           placeholderStyle={[styles.amountText, { color: c.ghost }]}
         />
         <Text style={[styles.amountText, { color: c.ghost }]}>{currencySymbol(currency)}</Text>
+        {/* before the field: an autofocused field only gets a bar that's already there */}
+        <KeyboardDone />
         <TextInput
           value={amountText}
           onChangeText={(next) => {
             if (AMOUNT_TYPING.test(next)) onAmountText(next);
           }}
           keyboardType="decimal-pad"
+          inputAccessoryViewID={KEYBOARD_DONE_ID}
           autoFocus
           caretHidden
           contextMenuHidden

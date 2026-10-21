@@ -2,7 +2,7 @@ import { BlurView } from 'expo-blur';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { useTheme, whiteAlpha, withAlpha } from '@/theme';
+import { mixHex, useTheme, whiteAlpha, withAlpha } from '@/theme';
 
 type Props = {
   radius?: number;
@@ -24,6 +24,10 @@ export function Glass({ radius = 24, blur = false, style, contentStyle, children
   const white = (a: number) => withAlpha(c.white, whiteAlpha(a, dark));
   const stroke = whiteAlpha(0.82, dark);
   const highlight = whiteAlpha(0.9, dark);
+  // On dark, the flowing backdrop can be bright right under a card; a thin
+  // white veil would leave grey text unreadable there, so the glass is the
+  // screen's own colour at half strength (with the white tint mixed in)
+  const fill = dark ? withAlpha(mixHex(c.bg, c.white, 0.1), 0.53) : white(0.66);
 
   return (
     <View style={[{ borderRadius: radius, boxShadow: `0 14px 34px -16px ${withAlpha(c.shadow, 0.32)}` }, style]}>
@@ -36,7 +40,7 @@ export function Glass({ radius = 24, blur = false, style, contentStyle, children
             {
               flexGrow: 1,
               borderRadius: radius,
-              backgroundColor: white(0.66),
+              backgroundColor: fill,
               borderWidth: 1,
               borderColor: withAlpha(c.white, stroke),
             },

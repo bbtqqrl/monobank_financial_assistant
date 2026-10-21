@@ -11,7 +11,8 @@ export type Tone =
   | 'onBackdrop'
   | 'accentText'
   | 'onPrimary'
-  | 'danger';
+  | 'danger'
+  | 'positive';
 
 type Props = TextProps & {
   variant?: TextVariant;
@@ -23,11 +24,13 @@ const MAX_FONT_SCALE = 1.3;
 
 export function Text({ variant = 'body', tone = 'ink', style, ...rest }: Props) {
   const { c } = useTheme();
+  // red as text is deeper than on icons and bars, so small type reads on glass
+  const color = tone === 'danger' ? c.dangerText : c[tone];
   return (
     <RNText
       maxFontSizeMultiplier={MAX_FONT_SCALE}
       {...rest}
-      style={[TEXT[variant], { color: c[tone] }, style]}
+      style={[TEXT[variant], { color }, style]}
     />
   );
 }

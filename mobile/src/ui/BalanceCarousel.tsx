@@ -33,7 +33,14 @@ const SHADOW = 48;
 
 // Swipe between accounts. The row runs edge to edge so cards slide in from
 // the screen edge; dots below follow the finger.
-export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData[]; onLongPress?: () => void }) {
+type Props = {
+  cards: BalanceCardData[];
+  onLongPress?: () => void;
+  // one more plate after the cards (the jars), drawn at the given width
+  extra?: (width: number) => ReactNode;
+};
+
+export function BalanceCarousel({ cards, onLongPress, extra }: Props) {
   const { width } = useWindowDimensions();
   const hidden = balanceHidden.useValue();
   const progress = useSharedValue(0);
@@ -50,7 +57,9 @@ export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData
     setBalanceHidden(!hidden);
   };
 
-  if (cards.length < 2) {
+  const plates = cards.length + (extra ? 1 : 0);
+
+  if (plates < 2) {
     const { key: _key, ...card } = cards[0] ?? { key: 0 };
     return <BalanceCard {...card} hidden={hidden} onToggleHidden={flipHidden} onLongPress={onLongPress} />;
   }
@@ -79,10 +88,15 @@ export function BalanceCarousel({ cards, onLongPress }: { cards: BalanceCardData
             />
           </Tilt>
         ))}
+        {extra ? (
+          <Tilt index={cards.length} progress={progress}>
+            {extra(cardWidth)}
+          </Tilt>
+        ) : null}
       </Animated.ScrollView>
       <View style={styles.dots}>
-        {cards.map((card, i) => (
-          <Dot key={card.key} index={i} progress={progress} />
+        {Array.from({ length: plates }, (_, i) => (
+          <Dot key={i} index={i} progress={progress} />
         ))}
       </View>
     </View>

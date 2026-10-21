@@ -91,7 +91,7 @@ export function MonthCard({ title, aside, onPress, onPrev, onNext, flow, days, n
           {/* the label and arrow already say it's going out, so no minus, as on the balance card */}
           <Stat icon="arrowDown" label="Витрати" tint={c.category.copper} value={flow && -flow.spent} />
           <View style={[styles.statSplit, { backgroundColor: withAlpha(c.shade, 0.07) }]} />
-          <Stat icon="arrowUp" label="Надходження" tint={c.category.green} value={flow && flow.income} income />
+          <Stat icon="arrowUp" label="Доходи" tint={c.category.green} value={flow && flow.income} income />
         </View>
       )}
     </Glass>
@@ -122,6 +122,7 @@ function Stat({ icon, label, tint, value, income = false }: {
   value: number | undefined;
   income?: boolean;
 }) {
+  const { c } = useTheme();
   const mask = useMask();
   return (
     <View style={styles.stat}>
@@ -135,7 +136,7 @@ function Stat({ icon, label, tint, value, income = false }: {
         {value === undefined ? (
           <View style={[styles.skeleton, { backgroundColor: withAlpha(tint, 0.12) }]} />
         ) : (
-          <Text variant="rowAmount" numberOfLines={1} style={[styles.statValue, income && value > 0 && { color: tint }]}>
+          <Text variant="rowAmount" numberOfLines={1} style={[styles.statValue, income && value > 0 && { color: c.positive }]}>
             {mask(formatMoney(value, UAH, { cents: false, sign: income && value > 0 ? 'always' : 'auto' }))}
           </Text>
         )}

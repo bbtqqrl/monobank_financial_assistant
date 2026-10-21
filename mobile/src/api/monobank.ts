@@ -5,7 +5,7 @@ import type { Flash } from '@/lib/useFlash';
 
 import { AccountSchema } from './accounts';
 import { api } from './client';
-import { JARS_KEY, JarSchema, type Jar } from './jars';
+import { JARS_KEY, JarSchema, SAMPLE_JARS, type Jar } from './jars';
 
 // The backend re-reads cards and balances from monobank with the stored token.
 // Webhooks only bring transactions, so balances go stale without this.
@@ -51,6 +51,8 @@ export function useJars(enabled: boolean) {
       await syncMonobank(qc);
       return qc.getQueryData<Jar[]>(JARS_KEY) ?? [];
     },
+    // TODO: remove the samples once there's an account with real jars to look at
+    select: (jars) => (jars.length || !__DEV__ ? jars : SAMPLE_JARS),
     enabled,
   });
 }

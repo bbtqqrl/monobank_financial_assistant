@@ -3,7 +3,7 @@ import { useColorScheme } from 'react-native';
 import { COLORS, type Colors } from './colors';
 
 export { TEXT, type TextVariant } from './typography';
-export { whiteAlpha, withAlpha, type Colors } from './colors';
+export { mixHex, whiteAlpha, withAlpha, type Colors } from './colors';
 
 export type Theme = { dark: boolean; c: Colors };
 

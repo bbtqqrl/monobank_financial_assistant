@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet } from 'react-native';
 
 import { signOut } from '@/api/auth';
 import { goBack } from '@/lib/nav';
@@ -45,10 +45,23 @@ export default function ProfileScreen() {
       <Pressable
         accessibilityRole="button"
         disabled={busy}
-        onPress={() => {
-          setBusy(true);
-          signOut();
-        }}
+        onPress={() =>
+          Alert.alert(
+            'Вийти з акаунта?',
+            lock ? 'Код-пароль на цьому телефоні теж буде вимкнено' : undefined,
+            [
+              { text: 'Скасувати', style: 'cancel' },
+              {
+                text: 'Вийти',
+                style: 'destructive',
+                onPress: () => {
+                  setBusy(true);
+                  signOut();
+                },
+              },
+            ],
+          )
+        }
         style={({ pressed }) => pressed && styles.pressed}
       >
         {/* plain glass with a red label: a red tint over the backdrop turns muddy */}

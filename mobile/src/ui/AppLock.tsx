@@ -1,6 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { FullWindowOverlay } from 'react-native-screens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,6 +38,10 @@ const FADE_MS = 200;
 
 // the dots turn green for a beat, then the lock goes
 const OPEN_DELAY_MS = 260;
+// the lock fades off the app instead of vanishing in one frame
+const UNLOCK_MS = 320;
+
+const release = () => locked.set(false);
 
 // seconds left of the rest after too many wrong codes, ticking down.
 // Counted from the rest's own start until the first tick, so a lock screen
@@ -58,11 +70,28 @@ function LockScreen() {
   const useFace = biometricEnabled.useValue() && !!biometry?.available;
   const [done, setDone] = useState(false);
   const rest = useRestLeft();
+  const reduced = useReducedMotion();
+
+  // fades out and grows a touch, as if the app came forward through it
+  const shown = useSharedValue(1);
+  const leaving = useAnimatedStyle(() => ({
+    opacity: shown.get(),
+    transform: [{ scale: reduced ? 1 : 1 + (1 - shown.get()) * 0.04 }],
+  }));
+  const unlock = useCallback(
+    () =>
+      shown.set(
+        withTiming(0, { duration: UNLOCK_MS, easing: Easing.out(Easing.cubic) }, (finished) => {
+          if (finished) scheduleOnRN(release);
+        }),
+      ),
+    [shown],
+  );
 
   const open = () => {
     settle();
     setDone(true);
-    setTimeout(() => locked.set(false), OPEN_DELAY_MS);
+    setTimeout(unlock, OPEN_DELAY_MS);
   };
 
   useEffect(() => {
@@ -70,7 +99,7 @@ function LockScreen() {
     const tryFace = async () => {
       if (await authenticate('Розблокувати blink')) {
         settle();
-        locked.set(false);
+        unlock();
       }
     };
     if (AppState.currentState === 'active') tryFace();
@@ -81,7 +110,7 @@ function LockScreen() {
       last = state;
     });
     return () => sub.remove();
-  }, [useFace]);
+  }, [useFace, unlock]);
 
   const enter = async (code: string) => {
     const result = await checkPin(code);
@@ -100,7 +129,9 @@ function LockScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 40, paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+    <Animated.View
+      style={[styles.screen, { paddingTop: insets.top + 40, paddingBottom: Math.max(insets.bottom, 16) + 8 }, leaving]}
+    >
       <PinBackdrop />
       <View style={styles.middle}>
         <PinPad
@@ -127,7 +158,7 @@ function LockScreen() {
           Забув код? Вийти з акаунта
         </Text>
       </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 

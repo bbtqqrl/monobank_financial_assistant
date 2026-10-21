@@ -53,7 +53,7 @@ export function JarRow({ jar, onPress }: { jar: Jar; onPress?: () => void }) {
         <View style={styles.bottom}>
           <Text
             variant="rowCaption"
-            style={[reached && styles.reached, { color: reached ? c.category.green : c.faint }]}
+            style={[reached && styles.reached, { color: reached ? c.positive : c.faint }]}
           >
             {progress === null
               ? 'Без цілі'
@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   text: { flex: 1, gap: 6 },
   track: { height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
-  bottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
+  bottom: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', columnGap: 8, rowGap: 2 },
   reached: { fontFamily: FONT.ui.semiBold },
   sum: { fontVariant: ['tabular-nums'] },
 });

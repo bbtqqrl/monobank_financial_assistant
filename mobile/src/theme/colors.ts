@@ -5,9 +5,10 @@ const light = {
   sheet: '#F7F5F1',
   ink: '#1A1714',
   inkSoft: '#3A322B',
-  muted: '#706961',
-  faint: '#7A7269',
-  ghost: '#8B8279',
+  // muted, faint and ghost all keep 4.5:1 on glass over the coloured backdrop
+  muted: '#5F5851',
+  faint: '#665F58',
+  ghost: '#6B645D',
   // small labels straight on the coloured backdrop, ghost is too faint there
   onBackdrop: '#625A52',
   cream: '#FBF8F3',
@@ -25,6 +26,10 @@ const light = {
   shadow: '#282018',
   danger: '#C25A4E',
   warning: '#C98A2B',
+  // the same three as text: deeper, so small type still reads on glass
+  dangerText: '#9B483E',
+  warningText: '#835A1C',
+  positive: '#196E4C',
   category: {
     green: '#1F8A5F',
     copper: '#C7622E',
@@ -49,13 +54,13 @@ const dark: Colors = {
   sheet: '#1E1D24',
   ink: '#F0EDE7',
   inkSoft: '#D6CFC7',
-  muted: '#B0A8A0',
-  faint: '#9E968E',
-  ghost: '#999189',
+  muted: '#BDB6AE',
+  faint: '#B1ABA5',
+  ghost: '#ADA7A1',
   onBackdrop: '#A8A099',
   cream: '#FBF8F3',
   accent: '#7C8FE8',
-  accentText: '#7C8FE8',
+  accentText: '#96A5ED',
   accentOnDark: '#A9B6EF',
   accentFill: '#4C63CE',
   onPrimary: '#F5F7FF',
@@ -67,6 +72,9 @@ const dark: Colors = {
   shadow: '#000000',
   danger: '#DC8175',
   warning: '#D9A24A',
+  dangerText: '#E1948A',
+  warningText: '#D9A24A',
+  positive: '#49BB8B',
   category: {
     green: '#35B37E',
     copper: '#E08A55',
@@ -94,6 +102,14 @@ const WHITE_ALPHA_DARK: Record<number, number> = {
 
 export function whiteAlpha(a: number, isDark: boolean) {
   return isDark ? (WHITE_ALPHA_DARK[a] ?? a) : a;
+}
+
+// '#rrggbb' a share t of the way from a to b
+export function mixHex(a: string, b: string, t: number) {
+  const [x, y] = [a, b].map((h) => parseInt(h.slice(1), 16));
+  const ch = (n: number, s: number) => (n >> s) & 255;
+  const v = [16, 8, 0].map((s) => Math.round(ch(x!, s) + (ch(y!, s) - ch(x!, s)) * t));
+  return `#${v.map((n) => n.toString(16).padStart(2, '0')).join('')}`;
 }
 
 export function withAlpha(hex: string, a: number) {

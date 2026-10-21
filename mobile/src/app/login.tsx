@@ -6,8 +6,10 @@ import { register, signIn } from '@/api/auth';
 import { ApiError } from '@/api/client';
 import { FONT } from '@/lib/fonts';
 import { failure, success } from '@/lib/haptics';
+import { useTheme } from '@/theme';
 import { Backdrop } from '@/ui/Backdrop';
 import { Button } from '@/ui/Button';
+import { Icon } from '@/ui/icons/Icon';
 import { Text } from '@/ui/Text';
 import { TextField } from '@/ui/TextField';
 
@@ -17,10 +19,10 @@ function describe(e: unknown, mode: Mode) {
   if (e instanceof ApiError) {
     if (e.status === 401) return 'Неправильна пошта або пароль';
     if (e.status === 409) return 'Акаунт з цією поштою вже є';
-    if (e.status === 422) return mode === 'register' ? 'Перевір пошту, пароль від 8 символів' : 'Перевір пошту';
+    if (e.status === 422) return mode === 'register' ? 'Перевір пошту. Пароль — щонайменше 8 символів' : 'Перевір пошту';
     // the backend limits sign-in and sign-up attempts
     if (e.status === 429) return 'Забагато спроб, спробуй трохи згодом';
-    return `Сервер відповів помилкою (${e.status})`;
+    return 'Щось пішло не так. Спробуй трохи згодом';
   }
   return 'Немає зʼєднання з сервером';
 }
@@ -29,7 +31,9 @@ function describe(e: unknown, mode: Mode) {
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
+  const { c } = useTheme();
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const passwordRef = useRef<TextInput>(null);
@@ -79,7 +83,18 @@ export default function LoginScreen() {
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Пароль"
-                secureTextEntry
+                secureTextEntry={!showPassword}
+                trailing={
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? 'Сховати пароль' : 'Показати пароль'}
+                    hitSlop={8}
+                    onPress={() => setShowPassword((v) => !v)}
+                    style={({ pressed }) => [styles.eye, pressed && styles.pressedEye]}
+                  >
+                    <Icon name={showPassword ? 'eyeOff' : 'eye'} size={19} color={c.faint} weight={1.8} />
+                  </Pressable>
+                }
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 textContentType={mode === 'login' ? 'password' : 'newPassword'}
                 returnKeyType="go"
@@ -121,4 +136,6 @@ const styles = StyleSheet.create({
   title: { fontFamily: FONT.display.medium, fontSize: 28, lineHeight: 34, letterSpacing: -0.28 },
   fields: { gap: 10 },
   switch: { textAlign: 'center', paddingVertical: 6 },
+  eye: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 3 },
+  pressedEye: { opacity: 0.6 },
 });

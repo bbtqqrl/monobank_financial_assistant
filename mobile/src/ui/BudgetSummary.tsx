@@ -34,7 +34,7 @@ export function BudgetSummary({ budgets, now = new Date() }: { budgets: Budget[]
             : 'Ліміти перевищено'}
       </Text>
       <View style={styles.amountRow}>
-        <Text style={[TEXT.amountXl, styles.amount, left < 0 && { color: c.danger }]}>{money(Math.abs(left))}</Text>
+        <Text style={[TEXT.amountXl, styles.amount, left < 0 && { color: c.dangerText }]}>{money(Math.abs(left))}</Text>
         <Text tone="faint" style={styles.of}>
           з {money(total)}
         </Text>

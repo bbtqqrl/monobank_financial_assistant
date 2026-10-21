@@ -15,6 +15,7 @@ type Props<K extends string> = {
   onChange: (key: K) => void;
 };
 
+const HIT = { top: 6, bottom: 6 };
 const SLIDE = { duration: 220, easing: Easing.out(Easing.cubic) };
 
 // A few choices in one capsule; a raised thumb slides under the picked one
@@ -63,6 +64,8 @@ export function Segmented<K extends string>({ options, value, onChange }: Props<
             key={o.key}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
+            // the capsule is 32pt tall, the finger gets 44
+            hitSlop={HIT}
             onPress={() => {
               if (on) return;
               tap();

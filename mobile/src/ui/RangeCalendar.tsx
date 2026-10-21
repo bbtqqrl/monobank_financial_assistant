@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   title: { fontSize: 15 },
   week: { flexDirection: 'row' },
-  weekday: { flex: 1, textAlign: 'center', fontSize: 11.5 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 12 },
   cell: { flex: 1, height: 40, alignItems: 'center', justifyContent: 'center' },
   edge: { borderRadius: 13 },
   day: { fontSize: 14 },

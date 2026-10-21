@@ -59,7 +59,7 @@ export function TxRow({ look, title, caption, unsure = false, amount, currency, 
         </View>
       </View>
       <View style={styles.right}>
-        <Text variant="rowAmount" style={income && { color: c.category.green }}>
+        <Text variant="rowAmount" style={income && { color: c.positive }}>
           {mask(formatMoney(amount, currency, { sign: income ? 'always' : 'auto' }))}
         </Text>
         <Text variant="rowCaption" tone="faint" style={styles.when}>
@@ -79,5 +79,5 @@ const styles = StyleSheet.create({
   caption: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   captionText: { flexShrink: 1 },
   right: { alignItems: 'flex-end', gap: 2 },
-  when: { fontSize: 11.5 },
+  when: { fontSize: 12 },
 });
