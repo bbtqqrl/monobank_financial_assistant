@@ -145,13 +145,15 @@ class SearchTransactionsArgs(BaseModel):
     currency: str | None = Field(
         default=None, pattern=r"^[A-Z]{3}$",
         description=(
-            "Валюта самої покупки (operation_currency) ISO, наприклад PLN. Не валюта картки: "
-            "щоб шукати по картці, передай її account_id."
+            "Валюта ISO, наприклад PLN або EUR: операції, де покупка була в цій валюті або картка в цій валюті."
         ),
     )
     search: str | None = Field(default=None, max_length=100, description="Підрядок в описі транзакції без урахування регістру.")
     category_id: int | None = Field(default=None, description="Категорія; батьківська охоплює дочірні.")
-    type: Literal["expense", "income", "transfer"] | None = None
+    type: Literal["expense", "income", "transfer"] | None = Field(
+        default=None,
+        description="Тип категорії. Не став, якщо шукаєш платежі конкретному мерчанту: поповнення й перекази мають тип transfer.",
+    )
     date_from: date | None = Field(default=None, description="З цієї дати YYYY-MM-DD включно.")
     date_to: date | None = Field(default=None, description="По цю дату YYYY-MM-DD включно.")
     account_id: int | None = None
@@ -290,11 +292,18 @@ async def search_transactions(ctx: ToolContext, args: SearchTransactionsArgs) ->
         currency_code=currency_code,
         order=args.sort,
     )
-    return {
+    result = {
         "total_count": total,
         "page": args.page,
         "items": [_transaction_item(transaction, category, currency, zone) for transaction, category, currency in rows],
     }
+    narrowing = [name for name in ("type", "currency", "category_id") if getattr(args, name) is not None]
+    if total == 0 and narrowing:
+        result["hint"] = (
+            f"Nothing found with filters {narrowing}. Before saying there is nothing, search again without them: "
+            "payments to services like Revolut are often transfers, not expenses."
+        )
+    return result
 
 
 def _transaction_item(transaction, category, account_currency: int, zone: ZoneInfo) -> dict:

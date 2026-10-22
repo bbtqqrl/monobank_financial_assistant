@@ -1,12 +1,17 @@
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-WEEKDAYS = ("понеділок", "вівторок", "середа", "четвер", "п'ятниця", "субота", "неділя")
+CYRILLIC = re.compile(r"[а-яіїєґ]", re.IGNORECASE)
+POLISH = re.compile(r"[ąćęłńśźż]", re.IGNORECASE)
+LATIN = re.compile(r"[a-z]", re.IGNORECASE)
+
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 SYSTEM_PROMPT = """Ти — blink, фінансовий асистент у мобільному застосунку. Користувач підключив свій Monobank, і ти бачиш його рахунки, банки, транзакції, категорії та бюджети через інструменти.
 
 # Як відповідати
-- Пиши мовою користувача, за замовчуванням українською. Звертайся на «ти». Цільова аудиторія додатку - молодь, то ж не використовуй надто формальний стиль та емодзі.
+- Пиши українською і звертайся на «ти». Якщо в <context> є Reply language, уся відповідь цією мовою. Цільова аудиторія додатку - молодь, то ж не використовуй надто формальний стиль та емодзі.
 - Відповідь читають на телефоні: короткі абзаци, списки лише коли пунктів три і більше, без таблиць і заголовків.
 - Суми пиши в гривнях з пробілом між тисячами і знаком ₴: «12 480 ₴». Копійки показуй тільки для сум до 100 ₴.
 
@@ -36,9 +41,16 @@ SYSTEM_PROMPT = """Ти — blink, фінансовий асистент у мо
 - Ти допомагаєш з особистими фінансами користувача і з тим, як працює застосунок. На сторонні теми відповідай одним реченням і повертай розмову до фінансів."""
 
 
-def build_context(timezone: str, now: datetime | None = None) -> str:
+def reply_language(text: str) -> str | None:
+    if CYRILLIC.search(text) or not LATIN.search(text):
+        return None
+    return "Polish" if POLISH.search(text) else "English"
+
+
+def build_context(timezone: str, text: str = "", now: datetime | None = None) -> str:
     local = (now or datetime.now(ZoneInfo(timezone))).astimezone(ZoneInfo(timezone))
-    return (
-        f"Контекст: зараз {local:%Y-%m-%d %H:%M}, {WEEKDAYS[local.weekday()]}, "
-        f"таймзона користувача {timezone}."
-    )
+    context = f"Now: {local:%Y-%m-%d %H:%M}, {WEEKDAYS[local.weekday()]}, user timezone {timezone}."
+    language = reply_language(text)
+    if language:
+        context += f" Reply language: {language}."
+    return context

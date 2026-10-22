@@ -64,7 +64,7 @@ class AgentRunner:
         if self.conversation.title is None:
             self.conversation.title = text.strip()[:TITLE_LENGTH]
         await self._append(history, "user", [
-            {"type": "text", "text": f"<context>{build_context(self.timezone)}</context>"},
+            {"type": "text", "text": f"<context>{build_context(self.timezone, text)}</context>"},
             {"type": "text", "text": text},
         ])
         await self.db.commit()

@@ -97,7 +97,10 @@ class TransactionRepository:
         if search:
             conditions.append(TransactionRaw.description.ilike(f"%{search}%"))
         if currency_code is not None:
-            conditions.append(TransactionRaw.currency_code == currency_code)
+            conditions.append(or_(
+                TransactionRaw.currency_code == currency_code,
+                func.coalesce(MonoAccount.currency_code, MonoJar.currency_code) == currency_code,
+            ))
         if category_id is not None:
             # A parent category also covers its children (the tree is two levels deep).
             conditions.append(or_(TransactionRaw.category_id == category_id, Category.parent_id == category_id))
