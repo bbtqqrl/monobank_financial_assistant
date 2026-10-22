@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 from app.db.models.categories import Category
 from app.db.models.transaction import TransactionRaw
 
-# TODO: брати таймзону з налаштувань користувача, коли вони з'являться
+# TODO: брати таймзону з налаштувань користувача, коли вони зявляться
 DEFAULT_TIMEZONE = "Europe/Kyiv"
 
 Dimension = Literal["category", "leaf_category", "day", "week", "month", "weekday", "currency"]
