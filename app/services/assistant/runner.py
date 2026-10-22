@@ -2,9 +2,10 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
-from anthropic.types import Message, ToolUseBlock
+from anthropic.types.beta import BetaMessage, BetaToolUseBlock
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import ASSISTANT_COMPACTION_TRIGGER_TOKENS
 from app.db.models.conversation import Conversation
 from app.db.session import SessionLocal
 from app.repositories.conversation import ConversationRepository
@@ -57,7 +58,7 @@ class AgentRunner:
         self.conversations = ConversationRepository(db)
 
     async def run(self, text: str) -> AsyncIterator[AgentEvent]:
-        history = await self.messages.history(self.conversation.id)
+        history = _since_last_compaction(await self.messages.history(self.conversation.id))
         await self._close_interrupted_turn(history)
 
         if self.conversation.title is None:
@@ -70,7 +71,7 @@ class AgentRunner:
 
         for step in range(MAX_STEPS):
             is_last_step = step == MAX_STEPS - 1
-            message: Message | None = None
+            message: BetaMessage | None = None
             async for event in self.llm.stream(
                 purpose="chat",
                 system=SYSTEM_PROMPT,
@@ -79,6 +80,7 @@ class AgentRunner:
                 tool_choice={"type": "none"} if is_last_step else None,
                 user_id=self.user_id,
                 conversation_id=self.conversation.id,
+                compaction_trigger=ASSISTANT_COMPACTION_TRIGGER_TOKENS,
             ):
                 if isinstance(event, TextDelta):
                     yield event
@@ -100,7 +102,7 @@ class AgentRunner:
             await self._append(history, "user", list(results))
             await self.db.commit()
 
-    async def _run_tool(self, block: ToolUseBlock) -> dict:
+    async def _run_tool(self, block: BetaToolUseBlock) -> dict:
         async with self.session_factory() as db:
             content, is_error = await self.registry.run(
                 ToolContext(db, self.user_id, self.timezone), block.name, block.input,
@@ -130,6 +132,16 @@ class AgentRunner:
         return saved
 
 
-def _content(message: Message) -> list[dict]:
+def _since_last_compaction(history: list[dict]) -> list[dict]:
+    for index in range(len(history) - 1, -1, -1):
+        message = history[index]
+        if message["role"] == "assistant" and any(
+            block.get("type") == "compaction" and block.get("content") for block in message["content"]
+        ):
+            return history[index:]
+    return history
+
+
+def _content(message: BetaMessage) -> list[dict]:
     content = [block.model_dump(mode="json", exclude_none=True) for block in message.content]
     return content or [{"type": "text", "text": INTERRUPTED_TEXT}]

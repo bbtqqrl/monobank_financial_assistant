@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from anthropic import AsyncAnthropic, omit
-from anthropic.types import Message, MessageParam, ToolChoiceParam, ToolParam
+from anthropic.types import MessageParam, ToolChoiceParam, ToolParam
+from anthropic.types.beta import BetaMessage
 
 from app.core.config import ANTHROPIC_API_KEY, ASSISTANT_MAX_TOKENS, ASSISTANT_MODEL
 from app.db.models.llm_usage import LLMUsage
@@ -16,6 +17,7 @@ from app.services.llm.pricing import cost_usd
 logger = logging.getLogger(__name__)
 
 CACHE_CONTROL = {"type": "ephemeral"}
+COMPACTION_BETA = "compact-2026-01-12"
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -33,7 +35,7 @@ class ToolUseStarted:
 
 @dataclass(frozen=True)
 class Completed:
-    message: Message
+    message: BetaMessage
 
 
 LLMEvent = TextDelta | ToolUseStarted | Completed
@@ -57,12 +59,21 @@ class LLMClient:
         model: str = ASSISTANT_MODEL,
         max_tokens: int = ASSISTANT_MAX_TOKENS,
         effort: Effort = "low",
+        compaction_trigger: int | None = None,
     ) -> AsyncIterator[LLMEvent]:
         started = time.monotonic()
         stream = None
-        message: Message | None = None
+        message: BetaMessage | None = None
+        context_management = omit
+        if compaction_trigger is not None:
+            context_management = {"edits": [{
+                "type": "compact_20260112",
+                "trigger": {"type": "input_tokens", "value": compaction_trigger},
+            }]}
         try:
-            async with self._client.messages.stream(
+            async with self._client.beta.messages.stream(
+                betas=[COMPACTION_BETA],
+                context_management=context_management,
                 model=model,
                 max_tokens=max_tokens,
                 system=[{"type": "text", "text": system, "cache_control": CACHE_CONTROL}],
@@ -92,7 +103,7 @@ class LLMClient:
 
     async def _record(
         self,
-        message: Message | None,
+        message: BetaMessage | None,
         *,
         request_id: str | None,
         purpose: str,
@@ -103,11 +114,23 @@ class LLMClient:
     ) -> None:
         if message is None:
             return
-        usage = message.usage
-        input_tokens = usage.input_tokens or 0
-        output_tokens = usage.output_tokens or 0
-        cache_read = usage.cache_read_input_tokens or 0
-        cache_write = usage.cache_creation_input_tokens or 0
+        iterations = message.usage.iterations or [message.usage]
+        input_tokens = sum(item.input_tokens or 0 for item in iterations)
+        output_tokens = sum(item.output_tokens or 0 for item in iterations)
+        cache_read = sum(item.cache_read_input_tokens or 0 for item in iterations)
+        cache_write = sum(item.cache_creation_input_tokens or 0 for item in iterations)
+        cost = sum(
+            cost_usd(
+                model,
+                item.input_tokens or 0,
+                item.output_tokens or 0,
+                item.cache_read_input_tokens or 0,
+                item.cache_creation_input_tokens or 0,
+            )
+            for item in iterations
+        )
+        if any(getattr(item, "type", None) == "compaction" for item in iterations):
+            logger.info("Conversation %s compacted", conversation_id)
         try:
             async with SessionLocal() as db:
                 LLMUsageRepository(db).add(LLMUsage(
@@ -120,7 +143,7 @@ class LLMClient:
                     output_tokens=output_tokens,
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write,
-                    cost_usd=cost_usd(model, input_tokens, output_tokens, cache_read, cache_write),
+                    cost_usd=cost,
                     stop_reason=message.stop_reason,
                     duration_ms=duration_ms,
                 ))
@@ -129,7 +152,7 @@ class LLMClient:
             logger.exception("Failed to record LLM usage")
 
 
-def _snapshot(stream) -> Message | None:
+def _snapshot(stream) -> BetaMessage | None:
     if stream is None:
         return None
     try:

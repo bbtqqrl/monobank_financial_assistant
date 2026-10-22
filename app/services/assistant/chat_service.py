@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import ASSISTANT_DAILY_MESSAGE_LIMIT
+from app.core.config import ASSISTANT_DAILY_MESSAGE_LIMIT, ASSISTANT_REPLY_TIMEOUT_SECONDS
 from app.db.models.message import Message
 from app.db.session import SessionLocal
 from app.repositories.analytics import DEFAULT_TIMEZONE
@@ -90,10 +90,13 @@ class AssistantService:
 
 async def _run_agent(user_id: int, conversation_id: int, text: str, timezone: str, queue: asyncio.Queue) -> None:
     try:
-        async with SessionLocal() as db:
+        async with asyncio.timeout(ASSISTANT_REPLY_TIMEOUT_SECONDS), SessionLocal() as db:
             conversation = await ConversationRepository(db).get_by_id_for_user(conversation_id, user_id)
             async for event in AgentRunner(db, user_id, conversation, timezone).run(text):
                 queue.put_nowait(_to_sse(event))
+    except TimeoutError:
+        logger.warning("Assistant reply timed out in conversation %s", conversation_id)
+        queue.put_nowait(_sse("error", {"code": "timeout", "detail": "Assistant took too long to answer"}))
     except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
         logger.warning("Assistant model unavailable: %s", e)
         queue.put_nowait(_sse("error", {"code": "model_unavailable", "detail": "Assistant is temporarily unavailable"}))
