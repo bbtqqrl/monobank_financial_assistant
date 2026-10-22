@@ -19,6 +19,8 @@ from app.schemas.assistant import (
     ConversationResponse,
     MessageListResponse,
     MessageResponse,
+    ReplyError,
+    ReplyResponse,
 )
 from app.services.assistant.runner import AgentRunner, Done, ToolStarted
 from app.services.errors import ConflictError, NotFoundError, TooManyRequestsError
@@ -64,7 +66,9 @@ class AssistantService:
             items = [item for item in items if item.id < before_id]
         return MessageListResponse(items=items[-limit:], has_more=len(items) > limit)
 
-    async def reply(self, conversation_id: int, text: str, context: ClientContext | None) -> AsyncIterator[str]:
+    async def reply(
+        self, conversation_id: int, text: str, context: ClientContext | None,
+    ) -> AsyncIterator[tuple[str, dict]]:
         conversation = await self._get(conversation_id)
         timezone = context.timezone if context and context.timezone else DEFAULT_TIMEZONE
 
@@ -93,38 +97,53 @@ async def _run_agent(user_id: int, conversation_id: int, text: str, timezone: st
         async with asyncio.timeout(ASSISTANT_REPLY_TIMEOUT_SECONDS), SessionLocal() as db:
             conversation = await ConversationRepository(db).get_by_id_for_user(conversation_id, user_id)
             async for event in AgentRunner(db, user_id, conversation, timezone).run(text):
-                queue.put_nowait(_to_sse(event))
+                queue.put_nowait(_to_event(event))
     except TimeoutError:
         logger.warning("Assistant reply timed out in conversation %s", conversation_id)
-        queue.put_nowait(_sse("error", {"code": "timeout", "detail": "Assistant took too long to answer"}))
+        queue.put_nowait(("error", {"code": "timeout", "detail": "Assistant took too long to answer"}))
     except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
         logger.warning("Assistant model unavailable: %s", e)
-        queue.put_nowait(_sse("error", {"code": "model_unavailable", "detail": "Assistant is temporarily unavailable"}))
+        queue.put_nowait(("error", {"code": "model_unavailable", "detail": "Assistant is temporarily unavailable"}))
     except Exception:
         logger.exception("Assistant reply failed")
-        queue.put_nowait(_sse("error", {"code": "internal", "detail": "Assistant failed to answer"}))
+        queue.put_nowait(("error", {"code": "internal", "detail": "Assistant failed to answer"}))
     finally:
         _busy_conversations.discard(conversation_id)
         queue.put_nowait(None)
 
 
-async def _stream(queue: asyncio.Queue) -> AsyncIterator[str]:
-    while (chunk := await queue.get()) is not None:
-        yield chunk
+async def _stream(queue: asyncio.Queue) -> AsyncIterator[tuple[str, dict]]:
+    while (item := await queue.get()) is not None:
+        yield item
 
 
-def _to_sse(event) -> str:
+def _to_event(event) -> tuple[str, dict]:
     if isinstance(event, TextDelta):
-        return _sse("delta", {"text": event.text})
+        return "delta", {"text": event.text}
     if isinstance(event, ToolStarted):
-        return _sse("tool", {"name": event.name, "label": event.label})
+        return "tool", {"name": event.name, "label": event.label}
     if isinstance(event, Done):
-        return _sse("done", {"message_id": event.message_id, "stop_reason": event.stop_reason})
+        return "done", {"message_id": event.message_id, "stop_reason": event.stop_reason}
     raise TypeError(f"Unknown agent event: {event!r}")
 
 
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+async def to_sse(events: AsyncIterator[tuple[str, dict]]) -> AsyncIterator[str]:
+    async for name, data in events:
+        yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def collect(events: AsyncIterator[tuple[str, dict]]) -> ReplyResponse:
+    reply = ReplyResponse(text="", tools=[])
+    async for name, data in events:
+        if name == "delta":
+            reply.text += data["text"]
+        elif name == "tool":
+            reply.tools.append(data["name"])
+        elif name == "done":
+            reply.message_id, reply.stop_reason = data["message_id"], data["stop_reason"]
+        elif name == "error":
+            reply.error = ReplyError(**data)
+    return reply
 
 
 def _to_chat(messages: list[Message]) -> list[MessageResponse]:

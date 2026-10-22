@@ -56,6 +56,19 @@ class MessageListResponse(BaseModel):
     has_more: bool
 
 
+class ReplyError(BaseModel):
+    code: Literal["timeout", "model_unavailable", "internal"]
+    detail: str
+
+
+class ReplyResponse(BaseModel):
+    text: str
+    tools: list[str]
+    message_id: int | None = None
+    stop_reason: str | None = None
+    error: ReplyError | None = None
+
+
 class PendingActionResponse(BaseModel):
     id: int
     action_type: str

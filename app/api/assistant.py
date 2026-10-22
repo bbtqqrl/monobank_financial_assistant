@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.assistant import ConversationResponse, MessageListResponse, SendMessageRequest
-from app.services.assistant.chat_service import AssistantService
+from app.schemas.assistant import ConversationResponse, MessageListResponse, ReplyResponse, SendMessageRequest
+from app.services.assistant.chat_service import AssistantService, collect, to_sse
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
 
@@ -53,14 +53,19 @@ async def list_messages(
 
 @router.post(
     "/conversations/{conversation_id}/messages",
-    response_class=StreamingResponse,
-    responses={200: {"content": {"text/event-stream": {}}, "description": "SSE: tool, delta, done, error"}},
+    responses={200: {
+        "content": {"text/event-stream": {}, "application/json": {"schema": ReplyResponse.model_json_schema()}},
+        "description": "SSE: tool, delta, done, error; з stream=false — одна JSON-відповідь",
+    }},
 )
 async def send_message(
     conversation_id: int,
     data: SendMessageRequest,
+    stream: bool = Query(default=True),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stream = await AssistantService(db, current_user.id).reply(conversation_id, data.text, data.context)
-    return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
+    events = await AssistantService(db, current_user.id).reply(conversation_id, data.text, data.context)
+    if not stream:
+        return await collect(events)
+    return StreamingResponse(to_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
