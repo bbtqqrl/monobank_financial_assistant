@@ -18,6 +18,12 @@ ACCOUNT_CURRENCY = func.coalesce(
 ).label("account_currency_code")
 
 
+ORDERS = {
+    "newest": (TransactionRaw.time.desc(), TransactionRaw.id.desc()),
+    "largest_expense": (TransactionRaw.amount_uah.asc().nulls_last(), TransactionRaw.time.desc()),
+}
+
+
 def _with_category_and_currency():
     return (
         select(TransactionRaw, Category, ACCOUNT_CURRENCY)
@@ -71,6 +77,8 @@ class TransactionRepository:
         search: str | None = None,
         page: int = 1,
         limit: int = 30,
+        currency_code: int | None = None,
+        order: Literal["newest", "largest_expense"] = "newest",
     ) -> tuple[list[tuple[TransactionRaw, Optional[Category], int]], int]:
         conditions = [TransactionRaw.user_id == user_id]
 
@@ -88,6 +96,8 @@ class TransactionRepository:
             conditions.append(TransactionRaw.time <= date_to)
         if search:
             conditions.append(TransactionRaw.description.ilike(f"%{search}%"))
+        if currency_code is not None:
+            conditions.append(TransactionRaw.currency_code == currency_code)
         if category_id is not None:
             # A parent category also covers its children (the tree is two levels deep).
             conditions.append(or_(TransactionRaw.category_id == category_id, Category.parent_id == category_id))
@@ -100,7 +110,7 @@ class TransactionRepository:
         total = count_result.scalar_one()
 
         result = await self.db.execute(
-            base.order_by(TransactionRaw.time.desc()).offset((page - 1) * limit).limit(limit)
+            base.order_by(*ORDERS[order]).offset((page - 1) * limit).limit(limit)
         )
 
         return list(result.all()), total

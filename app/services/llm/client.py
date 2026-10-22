@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from anthropic import AsyncAnthropic, omit
-from anthropic.types import Message, MessageParam, ToolParam
+from anthropic.types import Message, MessageParam, ToolChoiceParam, ToolParam
 
 from app.core.config import ANTHROPIC_API_KEY, ASSISTANT_MAX_TOKENS, ASSISTANT_MODEL
 from app.db.models.llm_usage import LLMUsage
@@ -51,6 +51,7 @@ class LLMClient:
         system: str,
         messages: list[MessageParam],
         tools: list[ToolParam] | None = None,
+        tool_choice: ToolChoiceParam | None = None,
         user_id: int | None = None,
         conversation_id: int | None = None,
         model: str = ASSISTANT_MODEL,
@@ -67,6 +68,7 @@ class LLMClient:
                 system=[{"type": "text", "text": system, "cache_control": CACHE_CONTROL}],
                 messages=messages,
                 tools=tools or omit,
+                tool_choice=tool_choice or omit,
                 output_config={"effort": effort},
                 cache_control=CACHE_CONTROL,
             ) as stream:

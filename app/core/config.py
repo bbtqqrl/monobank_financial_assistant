@@ -22,7 +22,7 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL", "claude-haiku-5-5")
-ASSISTANT_MAX_TOKENS = int(os.getenv("ASSISTANT_MAX_TOKENS", "4096"))
+ASSISTANT_MAX_TOKENS = int(os.getenv("ASSISTANT_MAX_TOKENS", "8192"))
 
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "production")
