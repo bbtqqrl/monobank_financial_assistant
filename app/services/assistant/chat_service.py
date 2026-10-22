@@ -1,0 +1,141 @@
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import anthropic
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import ASSISTANT_DAILY_MESSAGE_LIMIT
+from app.db.models.message import Message
+from app.db.session import SessionLocal
+from app.repositories.analytics import DEFAULT_TIMEZONE
+from app.repositories.conversation import ConversationRepository
+from app.repositories.message import MessageRepository
+from app.schemas.assistant import (
+    ClientContext,
+    ConversationResponse,
+    MessageListResponse,
+    MessageResponse,
+)
+from app.services.assistant.runner import AgentRunner, Done, ToolStarted
+from app.services.errors import ConflictError, NotFoundError, TooManyRequestsError
+from app.services.llm.client import TextDelta
+
+logger = logging.getLogger(__name__)
+
+CONTEXT_PREFIX = "<context>"
+
+_busy_conversations: set[int] = set()
+_background_tasks: set[asyncio.Task] = set()
+
+
+class AssistantService:
+
+    def __init__(self, db: AsyncSession, user_id: int):
+        self.db = db
+        self.user_id = user_id
+        self.conversations = ConversationRepository(db)
+        self.messages = MessageRepository(db)
+
+    async def create_conversation(self) -> ConversationResponse:
+        conversation = await self.conversations.create(self.user_id)
+        await self.db.commit()
+        await self.db.refresh(conversation)
+        return ConversationResponse.model_validate(conversation)
+
+    async def list_conversations(self, limit: int, offset: int) -> list[ConversationResponse]:
+        conversations = await self.conversations.list_for_user(self.user_id, limit, offset)
+        return [ConversationResponse.model_validate(conversation) for conversation in conversations]
+
+    async def delete_conversation(self, conversation_id: int) -> None:
+        conversation = await self._get(conversation_id)
+        if conversation.id in _busy_conversations:
+            raise ConflictError("Assistant is still answering in this conversation")
+        await self.conversations.delete(conversation)
+        await self.db.commit()
+
+    async def history(self, conversation_id: int, limit: int, before_id: int | None) -> MessageListResponse:
+        conversation = await self._get(conversation_id)
+        items = _to_chat(await self.messages.list_for_conversation(conversation.id))
+        if before_id is not None:
+            items = [item for item in items if item.id < before_id]
+        return MessageListResponse(items=items[-limit:], has_more=len(items) > limit)
+
+    async def reply(self, conversation_id: int, text: str, context: ClientContext | None) -> AsyncIterator[str]:
+        conversation = await self._get(conversation_id)
+        timezone = context.timezone if context and context.timezone else DEFAULT_TIMEZONE
+
+        day_start = datetime.now(ZoneInfo(timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if await self.messages.count_user_texts_since(self.user_id, day_start) >= ASSISTANT_DAILY_MESSAGE_LIMIT:
+            raise TooManyRequestsError("Daily message limit reached")
+        if conversation.id in _busy_conversations:
+            raise ConflictError("Assistant is still answering in this conversation")
+
+        _busy_conversations.add(conversation.id)
+        queue: asyncio.Queue = asyncio.Queue()
+        task = asyncio.create_task(_run_agent(self.user_id, conversation.id, text, timezone, queue))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+        return _stream(queue)
+
+    async def _get(self, conversation_id: int):
+        conversation = await self.conversations.get_by_id_for_user(conversation_id, self.user_id)
+        if conversation is None:
+            raise NotFoundError("Conversation not found")
+        return conversation
+
+
+async def _run_agent(user_id: int, conversation_id: int, text: str, timezone: str, queue: asyncio.Queue) -> None:
+    try:
+        async with SessionLocal() as db:
+            conversation = await ConversationRepository(db).get_by_id_for_user(conversation_id, user_id)
+            async for event in AgentRunner(db, user_id, conversation, timezone).run(text):
+                queue.put_nowait(_to_sse(event))
+    except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
+        logger.warning("Assistant model unavailable: %s", e)
+        queue.put_nowait(_sse("error", {"code": "model_unavailable", "detail": "Assistant is temporarily unavailable"}))
+    except Exception:
+        logger.exception("Assistant reply failed")
+        queue.put_nowait(_sse("error", {"code": "internal", "detail": "Assistant failed to answer"}))
+    finally:
+        _busy_conversations.discard(conversation_id)
+        queue.put_nowait(None)
+
+
+async def _stream(queue: asyncio.Queue) -> AsyncIterator[str]:
+    while (chunk := await queue.get()) is not None:
+        yield chunk
+
+
+def _to_sse(event) -> str:
+    if isinstance(event, TextDelta):
+        return _sse("delta", {"text": event.text})
+    if isinstance(event, ToolStarted):
+        return _sse("tool", {"name": event.name, "label": event.label})
+    if isinstance(event, Done):
+        return _sse("done", {"message_id": event.message_id, "stop_reason": event.stop_reason})
+    raise TypeError(f"Unknown agent event: {event!r}")
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _to_chat(messages: list[Message]) -> list[MessageResponse]:
+    items: list[MessageResponse] = []
+    for message in messages:
+        texts = [
+            block["text"] for block in message.content
+            if block.get("type") == "text" and not block["text"].startswith(CONTEXT_PREFIX)
+        ]
+        if message.role not in ("user", "assistant") or not texts:
+            continue
+        text = "\n\n".join(texts)
+        if message.role == "assistant" and items and items[-1].role == "assistant":
+            text = f"{items[-1].text}\n\n{text}"
+            items.pop()
+        items.append(MessageResponse(id=message.id, role=message.role, text=text, created_at=message.created_at))
+    return items
