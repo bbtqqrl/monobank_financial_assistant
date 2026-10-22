@@ -137,6 +137,44 @@ class InsightsResponse(BaseModel):
     items: list[Insight]
 
 
+class CategoryMonth(BaseModel):
+    month: str
+    amount: int
+
+
+class CategoryHistoryItem(BaseModel):
+    category_id: int
+    name: str
+    slug: str
+    months: list[CategoryMonth]
+    median: int
+    average: int
+    active_months: int
+
+
+class CategoryHistoryResponse(BaseModel):
+    month: str
+    months: list[MonthTotal]
+    items: list[CategoryHistoryItem]
+
+
+class RecurringItem(BaseModel):
+    merchant_key: str
+    name: str
+    category: CategoryRef
+    months_seen: int
+    payment_count: int
+    typical_amount: int
+    monthly_amount: int
+    stable_amount: bool
+    last_date: date
+
+
+class RecurringResponse(BaseModel):
+    months: list[str]
+    items: list[RecurringItem]
+
+
 class CurrencyItem(BaseModel):
     currency: str
     transaction_count: int

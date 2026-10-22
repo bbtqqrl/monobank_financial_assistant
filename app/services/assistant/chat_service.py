@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import ASSISTANT_DAILY_MESSAGE_LIMIT, ASSISTANT_REPLY_TIMEOUT_SECONDS
 from app.db.models.message import Message
+from app.db.models.user import User
 from app.db.session import SessionLocal
 from app.repositories.analytics import DEFAULT_TIMEZONE
 from app.repositories.conversation import ConversationRepository
@@ -96,7 +97,9 @@ async def _run_agent(user_id: int, conversation_id: int, text: str, timezone: st
     try:
         async with asyncio.timeout(ASSISTANT_REPLY_TIMEOUT_SECONDS), SessionLocal() as db:
             conversation = await ConversationRepository(db).get_by_id_for_user(conversation_id, user_id)
-            async for event in AgentRunner(db, user_id, conversation, timezone).run(text):
+            user = await db.get(User, user_id)
+            runner = AgentRunner(db, user_id, conversation, timezone, owner=user.mono_name if user else None)
+            async for event in runner.run(text):
                 queue.put_nowait(_to_event(event))
     except TimeoutError:
         logger.warning("Assistant reply timed out in conversation %s", conversation_id)
