@@ -13,8 +13,8 @@ from app.db.models.transaction import TransactionRaw
 # TODO: брати таймзону з налаштувань користувача, коли вони з'являться
 DEFAULT_TIMEZONE = "Europe/Kyiv"
 
-Dimension = Literal["category", "leaf_category", "day", "week", "month", "weekday"]
-Metric = Literal["sum", "count", "avg", "min", "max"]
+Dimension = Literal["category", "leaf_category", "day", "week", "month", "weekday", "currency"]
+Metric = Literal["sum", "count", "avg", "min", "max", "operation_sum"]
 
 
 def month_bounds(month: date, timezone: str) -> tuple[int, int]:
@@ -72,6 +72,7 @@ class AnalyticsRepository:
             "week": [func.to_char(func.date_trunc("week", local_time), "YYYY-MM-DD").label("week")],
             "month": [func.to_char(local_time, "YYYY-MM").label("month")],
             "weekday": [weekday.label("weekday")],
+            "currency": [TransactionRaw.currency_code.label("currency_code")],
         }
         metric_columns = {
             "sum": func.coalesce(func.sum(TransactionRaw.amount_uah), 0).label("sum"),
@@ -79,6 +80,9 @@ class AnalyticsRepository:
             "avg": func.round(func.avg(TransactionRaw.amount_uah)).label("avg"),
             "min": func.min(TransactionRaw.amount_uah).label("min"),
             "max": func.max(TransactionRaw.amount_uah).label("max"),
+            "operation_sum": func.coalesce(
+                func.sum(func.coalesce(TransactionRaw.operation_amount, TransactionRaw.amount)), 0,
+            ).label("operation_sum"),
         }
 
         group_columns = [column for dimension in group_by for column in dimension_columns[dimension]]
@@ -169,7 +173,7 @@ class AnalyticsRepository:
 
     @staticmethod
     def _to_ints(row: dict) -> dict:
-        for key in ("sum", "avg", "min", "max"):
+        for key in ("sum", "avg", "min", "max", "operation_sum"):
             if row.get(key) is not None:
                 row[key] = int(row[key])
         return row

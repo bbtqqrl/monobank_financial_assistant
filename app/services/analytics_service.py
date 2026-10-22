@@ -16,6 +16,8 @@ from app.schemas.analytics import (
     ChangesResponse,
     ComparePreset,
     ComparisonInfo,
+    CurrenciesResponse,
+    CurrencyItem,
     DailyPoint,
     Insight,
     InsightAction,
@@ -28,6 +30,7 @@ from app.schemas.analytics import (
     PeriodInfo,
     SpendingResponse,
 )
+from app.core.currencies import alpha_code
 from app.services.merchant_key import build_merchant_key
 
 EXPENSE_KINDS = ("expense",)
@@ -389,6 +392,30 @@ class AnalyticsService:
             ))
         insights.sort(key=lambda insight: -insight.diff)
         return InsightsResponse(month=month_key(month), items=insights[:MAX_INSIGHTS])
+
+    async def currencies(self, period: Period) -> CurrenciesResponse:
+        date_from, date_to = self._bounds(period)
+        rows = await self.repo.aggregate(
+            self.user_id,
+            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self.timezone,
+            group_by=["currency"],
+            metrics=["sum", "count", "operation_sum"],
+        )
+        spent = [(row, -row["sum"]) for row in rows if row["sum"] < 0]
+        total = sum(amount_uah for _, amount_uah in spent)
+        items = [
+            CurrencyItem(
+                currency=alpha_code(row["currency_code"]),
+                transaction_count=row["count"],
+                amount=-row["operation_sum"],
+                amount_uah=amount_uah,
+                share=share(amount_uah, total),
+            )
+            for row, amount_uah in spent
+        ]
+        items.sort(key=lambda item: -item.amount_uah)
+        return CurrenciesResponse(period=period.info(), total_uah=total, items=items)
 
     async def _aggregate(self, period: Period, group_by: list) -> list[dict]:
         date_from, date_to = self._bounds(period)

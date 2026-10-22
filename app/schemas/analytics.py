@@ -135,3 +135,17 @@ class Insight(BaseModel):
 class InsightsResponse(BaseModel):
     month: str
     items: list[Insight]
+
+
+class CurrencyItem(BaseModel):
+    currency: str
+    transaction_count: int
+    amount: int
+    amount_uah: int
+    share: float
+
+
+class CurrenciesResponse(BaseModel):
+    period: PeriodInfo
+    total_uah: int
+    items: list[CurrencyItem]

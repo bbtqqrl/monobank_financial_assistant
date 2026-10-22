@@ -10,3 +10,7 @@ __pycache__/
 .ruff_cache/
 certs/
 mobile/
+tests/
+evals/
+pytest.ini
+requirements-dev.txt
