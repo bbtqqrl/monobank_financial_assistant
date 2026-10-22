@@ -34,6 +34,10 @@ from app.db.models import (
     MonoJar,
     MccCode,
     Budget,
+    Conversation,
+    Message,
+    PendingAction,
+    LLMUsage,
 )
 
 from app.db.session import DATABASE_URL

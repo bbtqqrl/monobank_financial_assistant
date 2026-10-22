@@ -46,7 +46,7 @@ export function Header({ title, left, right, small = false, status = IDLE }: Pro
           ) : note ? (
             <Animated.View key={note.text} entering={FADE} style={styles.note}>
               <Icon name={note.ok ? 'check' : 'close'} size={15} color={note.ok ? c.category.green : c.danger} weight={2.4} />
-              <Text variant="bodyStrong" numberOfLines={1} style={[styles.noteText, { color: note.ok ? c.ink : c.danger }]}>
+              <Text variant="bodyStrong" numberOfLines={1} style={[styles.noteText, { color: note.ok ? c.ink : c.dangerText }]}>
                 {note.text}
               </Text>
             </Animated.View>

@@ -74,7 +74,7 @@ export function ProfileCard() {
           <View style={styles.statusText}>
             <Text variant="bodyStrong">{line.title}</Text>
             <Animated.View key={shown?.text ?? 'status'} entering={FadeIn.duration(160)}>
-              <Text variant="rowCaption" style={{ color: shown && !shown.ok ? c.danger : c.faint }}>
+              <Text variant="rowCaption" style={{ color: shown && !shown.ok ? c.dangerText : c.faint }}>
                 {shown ? shown.text : line.caption}
               </Text>
             </Animated.View>

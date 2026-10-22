@@ -80,7 +80,7 @@ export default function CardsSheet() {
 
   return (
     <GestureHandlerRootView style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-      <SheetHeader title="Картки" subtitle={'Затисни картку й потягни, щоб змінити порядок.\nОко ховає її з Огляду'} />
+      <SheetHeader title="Картки" subtitle={'Затисни картку й потягни, щоб змінити порядок.\nОко прибирає її з Огляду'} />
       <SortableList
         items={list}
         keyOf={idOf}

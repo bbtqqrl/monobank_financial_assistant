@@ -39,7 +39,7 @@ function sourceLine(t: TransactionDetail): { icon: IconName; text: string; unsur
     case 'pair':
       return { icon: 'transfer', text: 'Переказ між своїми' };
     case 'rule':
-      return { icon: 'list', text: 'За кодом MCC' };
+      return { icon: 'list', text: 'За типом магазину' };
     case 'mapping':
       return { icon: 'repeat', text: 'Як минулого разу' };
     case 'ai':
@@ -167,6 +167,7 @@ export default function TransactionScreen() {
   // the backend remembers the merchant: its other purchases can move along
   const forMerchant = t.source !== 'manual' && t.merchant_mapping_id !== null;
   const tint = src.unsure ? c.warning : c.accent;
+  const tintText = src.unsure ? c.warningText : c.accentText;
 
   const info: [string, string][] = [];
   if (account) info.push(['Рахунок', accountLabel(account)]);
@@ -188,7 +189,7 @@ export default function TransactionScreen() {
         <Text variant="bodyStrong" style={styles.title} numberOfLines={2}>
           {t.description}
         </Text>
-        <Text style={[TEXT.amountXl, styles.amount, { color: income ? c.category.green : c.ink }]}>
+        <Text style={[TEXT.amountXl, styles.amount, { color: income ? c.positive : c.ink }]}>
           {mask(formatMoney(t.amount, currency, { sign: income ? 'always' : 'auto' }))}
         </Text>
         <Text variant="rowCaption" tone="faint" style={styles.date}>
@@ -208,7 +209,7 @@ export default function TransactionScreen() {
             </Text>
             <View style={[styles.badge, { backgroundColor: withAlpha(tint, 0.13) }]}>
               <Icon name={src.icon} size={11} color={tint} weight={2.2} />
-              <Text variant="rowCaption" style={[styles.badgeText, { color: tint }]}>
+              <Text variant="rowCaption" style={[styles.badgeText, { color: tintText }]}>
                 {src.text}
               </Text>
             </View>
@@ -248,8 +249,8 @@ export default function TransactionScreen() {
         {forMerchant ? (
           <ChangeOption
             icon="repeat"
-            title="Усі покупки цього мерчанта"
-            sub={`Правило для «${t.description}»`}
+            title={`Усі покупки в «${t.description}»`}
+            sub="І майбутні теж"
             primary
             onPress={() => changeCategory('merchant')}
           />
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
   categoryText: { flex: 1, gap: 6, alignItems: 'flex-start' },
   categoryName: { fontSize: 16, lineHeight: 21 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 8 },
-  badgeText: { fontSize: 11.5, lineHeight: 15 },
+  badgeText: { fontSize: 12, lineHeight: 15 },
   change: { gap: 7 },
   // Figma: 9 15 9 15, gap 11
   option: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 9, paddingHorizontal: 15 },

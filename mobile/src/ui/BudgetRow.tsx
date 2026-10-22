@@ -60,7 +60,7 @@ export function BudgetRow({ budget, onPress, onLongPress }: Props) {
           <View style={[styles.fill, { width: `${Math.min(ratio, 1) * 100}%`, backgroundColor: tone }]} />
         </View>
         <View style={styles.bottom}>
-          <Text variant="rowCaption" style={[over && styles.overText, { color: over ? c.danger : c.faint }]}>
+          <Text variant="rowCaption" style={[over && styles.overText, { color: over ? c.dangerText : c.faint }]}>
             {over ? `Перевищено на ${money(-left)}` : `Залишилось ${money(left)}`}
           </Text>
           <Text variant="rowCaption" tone="muted" style={styles.sum}>
@@ -78,7 +78,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, gap: 6 },
   track: { height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
-  bottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
+  // with large text the sum moves under what's left instead of running off the card
+  bottom: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', columnGap: 8, rowGap: 2 },
   overText: { fontFamily: FONT.ui.semiBold },
   sum: { fontVariant: ['tabular-nums'] },
 });

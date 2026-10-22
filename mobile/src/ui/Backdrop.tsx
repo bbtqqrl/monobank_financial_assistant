@@ -25,6 +25,9 @@ const SAND = '#B29E7E';
 
 const DARK_STRENGTH = 0.78;
 
+// the screen whose colours the shared palette shows right now
+let paletteOwner: object | null = null;
+
 // The same palette as flowing blobs: the two tint colours in the top corners,
 // their mix wandering through the middle, sand and a bit of colour at the bottom
 function blobsFor(tint: Tint, accent: string, aspect: number, strength: number): Blob[] {
@@ -53,14 +56,18 @@ export function Backdrop({ variant, shared = false }: { variant: BackdropVariant
   // hidden and shows it for a frame on return, so there the colours switch at
   // once instead of morphing from the previous screen's and blinking.
   const shownBefore = useRef(false);
+  const me = useRef({});
   useEffect(() => {
-    if (!focused || variant === 'none') return;
+    // the screen under a sheet isn't focused but still shows: a theme switch
+    // made in the sheet recolours it too, not only once the sheet is gone
+    if ((!focused && paletteOwner !== me.current) || variant === 'none') return;
     setFlowPalette(
       c.bg,
       blobsFor(variant, c.accent, height / width, dark ? DARK_STRENGTH : 1),
       shared || !shownBefore.current,
     );
     shownBefore.current = true;
+    paletteOwner = me.current;
   }, [focused, variant, shared, c.bg, c.accent, dark, width, height]);
 
   if (shared && variant !== 'none') return null;

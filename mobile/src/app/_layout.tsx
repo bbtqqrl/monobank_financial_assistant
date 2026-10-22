@@ -17,6 +17,7 @@ import { loadSecurityPrefs } from '@/lib/security';
 import { useTheme, withAlpha } from '@/theme';
 import { loadThemePref } from '@/theme/preference';
 import { AppLock } from '@/ui/AppLock';
+import { ThemeFade } from '@/ui/ThemeFade';
 
 // keep the splash until fonts, saved settings and the saved session are ready
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -72,7 +73,8 @@ export default function RootLayout() {
           >
             <Stack.Protected guard={signedIn}>
               <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="profile" />
+              {/* its button is top left, so it comes in from the left (and swipes back to it) */}
+              <Stack.Screen name="profile" options={{ animation: 'slide_from_left' }} />
               <Stack.Screen name="security" />
               <Stack.Screen name="pin" />
               <Stack.Screen name="transaction/[id]/index" />
@@ -82,6 +84,7 @@ export default function RootLayout() {
               <Stack.Screen name="cards" options={sheet('fitToContents')} />
               <Stack.Screen name="theme" options={sheet('fitToContents')} />
               <Stack.Screen name="budget/[id]" />
+              <Stack.Screen name="jars" />
               <Stack.Screen name="jar/[id]" />
               {/* a new one needs the whole height, changing a limit only its content */}
               <Stack.Screen
@@ -95,6 +98,7 @@ export default function RootLayout() {
             </Stack.Protected>
           </Stack>
           {signedIn ? <AppLock /> : null}
+          <ThemeFade />
         </QueryClientProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

@@ -4,6 +4,7 @@ import { StyleSheet, TextInput, View } from 'react-native';
 import { FONT } from '@/lib/fonts';
 import { useTheme } from '@/theme';
 import { AmountDigits } from '@/ui/AmountDigits';
+import { KEYBOARD_DONE_ID, KeyboardDone } from '@/ui/KeyboardDone';
 import { Text } from '@/ui/Text';
 
 type Props = {
@@ -28,6 +29,8 @@ export function LimitField({ text, onText, inputRef }: Props) {
         placeholderStyle={[styles.digits, { color: c.ghost }]}
       />
       <Text style={[styles.digits, { color: c.ghost }]}>₴</Text>
+      {/* before the field: an autofocused field only gets a bar that's already there */}
+      <KeyboardDone />
       <TextInput
         ref={inputRef}
         value={text}
@@ -35,6 +38,7 @@ export function LimitField({ text, onText, inputRef }: Props) {
           if (LIMIT_TYPING.test(next)) onText(next);
         }}
         keyboardType="number-pad"
+        inputAccessoryViewID={KEYBOARD_DONE_ID}
         caretHidden
         contextMenuHidden
         accessibilityLabel="Ліміт у гривнях"

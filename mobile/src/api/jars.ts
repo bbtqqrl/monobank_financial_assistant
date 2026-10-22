@@ -17,6 +17,14 @@ export type Jar = z.infer<typeof JarSchema>;
 
 export const JARS_KEY = ['jars'];
 
+// TODO: remove: what jars look like, in dev builds only, while the account has none
+export const SAMPLE_JARS: Jar[] = [
+  { id: -1, mono_jar_id: 'sample1', title: '1', description: null, currency_code: 980, balance: 1_240_000, goal: 3_000_000, is_active: true },
+  { id: -2, mono_jar_id: 'sample2', title: '2', description: null, currency_code: 980, balance: 1_875_050, goal: 2_500_000, is_active: true },
+  { id: -3, mono_jar_id: 'sample3', title: '3', description: null, currency_code: 840, balance: 120_000, goal: 100_000, is_active: true },
+  { id: -4, mono_jar_id: 'sample4', title: '4', description: null, currency_code: 980, balance: 42_000, goal: null, is_active: true },
+];
+
 // the share of the goal saved, 0..1; null for a jar without a goal
 export function jarProgress(jar: Jar): number | null {
   if (!jar.goal || jar.goal <= 0) return null;

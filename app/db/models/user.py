@@ -9,6 +9,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.budget import Budget
+    from app.db.models.conversation import Conversation
     from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.mono_accounts import MonoAccount
     from app.db.models.mono_jars import MonoJar
@@ -56,4 +57,10 @@ class User(Base):
     budgets: Mapped[list["Budget"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

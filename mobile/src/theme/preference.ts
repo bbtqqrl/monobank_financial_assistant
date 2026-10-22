@@ -24,6 +24,10 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
+export function getThemePref(): ThemePref {
+  return current;
+}
+
 export function useThemePref(): ThemePref {
   return useSyncExternalStore(subscribe, () => current);
 }

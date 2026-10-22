@@ -39,7 +39,7 @@ type Filter = 'all' | TxType;
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'Усі' },
   { key: 'expense', label: 'Витрати' },
-  { key: 'income', label: 'Дохід' },
+  { key: 'income', label: 'Доходи' },
   { key: 'transfer', label: 'Рух коштів' },
 ];
 
@@ -47,7 +47,7 @@ const EMPTY: Record<Filter, { icon: IconName; title: string; caption: string }> 
   all: { icon: 'list', title: 'Транзакцій немає', caption: 'Тут зʼявляться твої операції' },
   expense: { icon: 'cart', title: 'Витрат немає', caption: 'Покупок не знайшлося' },
   income: { icon: 'income', title: 'Доходів немає', caption: 'Зарахувань не знайшлося' },
-  transfer: { icon: 'transfer', title: 'Порожньо', caption: 'Переказів між своїми рахунками не знайшлося' },
+  transfer: { icon: 'transfer', title: 'Переказів немає', caption: 'Переказів між своїми рахунками не знайшлося' },
 };
 
 // how long the pill ignores scrolling after a tap, while the list flies there

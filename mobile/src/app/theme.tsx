@@ -3,7 +3,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { tap } from '@/lib/haptics';
 import { useTheme, withAlpha } from '@/theme';
 import { COLORS } from '@/theme/colors';
-import { setThemePref, THEME_LABELS, useThemePref, type ThemePref } from '@/theme/preference';
+import { switchTheme, themeTarget } from '@/lib/themeSwitch';
+import { THEME_LABELS, useThemePref, type ThemePref } from '@/theme/preference';
 import { Icon } from '@/ui/icons/Icon';
 import { SheetHeader } from '@/ui/SheetHeader';
 import { Text } from '@/ui/Text';
@@ -40,7 +41,9 @@ function Preview({ pref }: { pref: ThemePref }) {
 // Theme picker under Profile: what each choice looks like, applied right away
 export default function ThemeSheet() {
   const { c } = useTheme();
-  const current = useThemePref();
+  const applied = useThemePref();
+  // a pick still waiting for the running change shows as picked already
+  const current = themeTarget.useValue() ?? applied;
 
   return (
     <View style={styles.sheet}>
@@ -57,7 +60,7 @@ export default function ThemeSheet() {
               onPress={() => {
                 if (selected) return;
                 tap();
-                setThemePref(pref);
+                switchTheme(pref);
               }}
               style={({ pressed }) => [styles.option, pressed && styles.pressed]}
             >

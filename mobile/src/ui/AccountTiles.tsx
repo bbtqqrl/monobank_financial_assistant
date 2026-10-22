@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
   tile: { width: 132, height: 104, padding: 12, justifyContent: 'space-between' },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cash: { width: ART, height: Math.round(ART * 0.64), borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
-  pan: { fontFamily: FONT.ui.medium, fontSize: 11.5, fontVariant: ['tabular-nums'] },
+  pan: { fontFamily: FONT.ui.medium, fontSize: 12, fontVariant: ['tabular-nums'] },
   name: { fontFamily: FONT.ui.medium, fontSize: 12 },
   sub: { fontFamily: FONT.ui.semiBold, fontSize: 14.5, fontVariant: ['tabular-nums'] },
 });

@@ -3,7 +3,8 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { accountName, ownBalance, sortedAccounts, useAccountCurrencies, useAccounts } from '@/api/accounts';
-import { REFRESH_FLASH, refreshAccounts } from '@/api/monobank';
+import { useMe } from '@/api/auth';
+import { REFRESH_FLASH, refreshAccounts, useJars } from '@/api/monobank';
 import { useTransactions } from '@/api/transactions';
 import { cardOrder, hiddenCards } from '@/lib/cardOrder';
 import { hold } from '@/lib/haptics';
@@ -15,9 +16,12 @@ import { usePullRefresh } from '@/lib/usePullRefresh';
 import { BalanceCard } from '@/ui/BalanceCard';
 import { BalanceCarousel } from '@/ui/BalanceCarousel';
 import { Header } from '@/ui/Header';
+import { JarsPlate } from '@/ui/JarsPlate';
 import { RecentCard } from '@/ui/RecentCard';
 import { Screen } from '@/ui/Screen';
 import { Text } from '@/ui/Text';
+
+const openJars = () => router.push('/jars');
 
 const openCards = () => {
   hold();
@@ -49,6 +53,9 @@ export default function OverviewScreen() {
         ? { label: 'Кредитний ліміт', value: formatMoney(a.credit_limit, a.currency_code, { cents: false }) }
         : undefined,
   }));
+
+  const me = useMe();
+  const jars = (useJars(!!me.data?.mono_client_id).data ?? []).filter((j) => j.is_active);
 
   const recent = useTransactions({ limit: 5 });
   const currencies = useAccountCurrencies();
@@ -88,7 +95,11 @@ export default function OverviewScreen() {
           <Text tone="faint">Щойно підключиш, тут зʼявиться баланс картки</Text>
         </View>
       ) : cards.length > 0 ? (
-        <BalanceCarousel cards={cards} onLongPress={openCards} />
+        <BalanceCarousel
+          cards={cards}
+          onLongPress={openCards}
+          extra={jars.length ? (width) => <JarsPlate jars={jars} onPress={openJars} style={{ width }} /> : undefined}
+        />
       ) : (
         // still loading
         <BalanceCard />

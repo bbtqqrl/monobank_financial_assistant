@@ -112,6 +112,6 @@ const styles = StyleSheet.create({
   ringBox: { padding: 4 },
   ring: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderRadius: 21 },
   more: { width: CHIP, height: CHIP, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  label: { fontFamily: FONT.ui.medium, fontSize: 11.5, lineHeight: 14, textAlign: 'center' },
+  label: { fontFamily: FONT.ui.medium, fontSize: 12, lineHeight: 15, textAlign: 'center' },
   labelOn: { fontFamily: FONT.ui.semiBold },
 });

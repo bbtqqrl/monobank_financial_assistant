@@ -55,7 +55,7 @@ export function JarSummary({ jar, goalDate, now = new Date() }: Props) {
               {percent}% цілі
             </Text>
             {goalDate ? (
-              <Text variant="rowCaption" style={[styles.pace, { color: green }]}>
+              <Text variant="rowCaption" style={[styles.pace, { color: c.positive }]}>
                 ≈ до {goalDay(goalDate, now)}
               </Text>
             ) : null}
