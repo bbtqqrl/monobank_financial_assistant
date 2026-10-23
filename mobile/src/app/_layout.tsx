@@ -85,6 +85,8 @@ export default function RootLayout() {
               <Stack.Screen name="theme" options={sheet('fitToContents')} />
               <Stack.Screen name="budget/[id]" />
               <Stack.Screen name="jars" />
+              <Stack.Screen name="spending/[id]" />
+              <Stack.Screen name="merchants" />
               <Stack.Screen name="jar/[id]" />
               {/* a new one needs the whole height, changing a limit only its content */}
               <Stack.Screen
