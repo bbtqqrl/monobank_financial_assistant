@@ -1,3 +1,4 @@
+import { fetch as streamingFetch } from 'expo/fetch';
 import { z } from 'zod';
 
 import { getTokens, setTokens } from './tokens';
@@ -49,11 +50,12 @@ async function send(path: string, { method = 'GET', body, auth = true }: Options
 }
 
 // FastAPI puts the reason into `detail`, a string or a list of validation errors
-async function errorMessage(res: Response) {
+async function errorMessage(res: { status: number; json(): Promise<unknown> }) {
   try {
-    const data = await res.json();
-    if (typeof data?.detail === 'string') return data.detail;
-    if (Array.isArray(data?.detail) && data.detail[0]?.msg) return String(data.detail[0].msg);
+    const data = (await res.json()) as { detail?: unknown } | null;
+    const detail = data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail[0]?.msg) return String(detail[0].msg);
   } catch {
     // not JSON
   }
@@ -92,22 +94,29 @@ async function refresh(): Promise<boolean> {
   return true;
 }
 
+// Sends with the current access token; on 401 refreshes once and sends again.
+async function authorized<R extends { status: number }>(
+  options: Options,
+  go: (access?: string) => Promise<R>,
+): Promise<R> {
+  const used = getTokens()?.access;
+  const res = await go(used);
+  if (res.status !== 401 || options.auth === false) return res;
+
+  // another request may have refreshed already while this one was waiting
+  const current = getTokens();
+  const fresh = !!current && current.access !== used;
+  if (!fresh) {
+    refreshing ??= refresh().finally(() => {
+      refreshing = null;
+    });
+  }
+  return fresh || (await refreshing) ? go(getTokens()?.access) : res;
+}
+
 // For calls whose response body isn't used (logout and the like).
 export async function request(path: string, options: Options = {}): Promise<unknown> {
-  const used = getTokens()?.access;
-  let res = await send(path, options, used);
-
-  if (res.status === 401 && options.auth !== false) {
-    // another request may have refreshed already while this one was waiting
-    const current = getTokens();
-    const fresh = !!current && current.access !== used;
-    if (!fresh) {
-      refreshing ??= refresh().finally(() => {
-        refreshing = null;
-      });
-    }
-    if (fresh || (await refreshing)) res = await send(path, options, getTokens()?.access);
-  }
+  const res = await authorized(options, (access) => send(path, options, access));
 
   if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
   if (res.status === 204) return undefined;
@@ -123,4 +132,26 @@ export async function request(path: string, options: Options = {}): Promise<unkn
 // the backend shows up here by name instead of as NaN somewhere in the UI.
 export async function api<S extends z.ZodType>(schema: S, path: string, options: Options = {}): Promise<z.infer<S>> {
   return parse(schema, await request(path, options), path);
+}
+
+// A POST whose answer comes in pieces (server-sent events). RN's own fetch
+// hands over the body only once it's complete, expo's reads it as it arrives.
+// No timeout: the server stops a reply itself, the caller can abort.
+export async function openStream(path: string, body: unknown, signal: AbortSignal) {
+  if (!BASE_URL) throw new Error('EXPO_PUBLIC_API_URL is not set, see mobile/README.md');
+  const res = await authorized({}, (access) =>
+    streamingFetch(BASE_URL + path, {
+      method: 'POST',
+      signal,
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+        ...(access && { Authorization: `Bearer ${access}` }),
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  if (!res.body) throw new ContractError(`${path}: empty response`);
+  return res.body;
 }
