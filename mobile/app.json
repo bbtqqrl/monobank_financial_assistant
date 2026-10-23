@@ -9,7 +9,7 @@
     "ios": {
       "bundleIdentifier": "app.blinkfinance",
       "appleTeamId": "9BUC27YL7Y",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "icon": "./assets/blink.icon",
       "config": {
         "usesNonExemptEncryption": false
