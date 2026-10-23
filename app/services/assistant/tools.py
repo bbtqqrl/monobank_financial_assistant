@@ -34,7 +34,7 @@ MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 CURRENCY_CODES = {alpha: numeric for numeric, alpha in ISO_ALPHA.items()}
 MONEY_KEYS = frozenset({
     "total", "total_uah", "expected", "amount", "amount_uah", "operation_amount", "current", "baseline", "diff",
-    "average", "balance", "credit_limit", "goal", "current_amount",
+    "average", "balance", "credit_limit", "goal", "current_amount", "median", "typical_amount", "monthly_amount",
 })
 ACCOUNT_TYPE_NAMES = {
     "black": "Чорна картка",
@@ -130,6 +130,15 @@ class MonthlyArgs(MonthArgs):
     months: int = Field(default=6, ge=2, le=12, description="Скільки місяців показати, закінчуючи month.")
 
 
+class CategoryHistoryArgs(MonthlyArgs):
+    category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії верхнього рівня. Без нього всі.")
+
+
+class RecurringArgs(MonthlyArgs):
+    category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії; батьківська охоплює дочірні.")
+    limit: int = Field(default=20, ge=1, le=50)
+
+
 class CategoryTreeArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -221,6 +230,20 @@ async def get_insights(ctx: ToolContext, args: MonthArgs) -> dict:
     service = _analytics(ctx, args.account_ids)
     result = await service.insights(_month(service, args.month))
     return result.model_dump(mode="json", exclude={"items": {"__all__": {"action"}}})
+
+
+async def get_category_history(ctx: ToolContext, args: CategoryHistoryArgs) -> dict:
+    service = _analytics(ctx, args.account_ids)
+    result = await service.category_history(_month(service, args.month), args.months)
+    if args.category_ids:
+        result.items = [item for item in result.items if item.category_id in args.category_ids]
+    return result.model_dump(mode="json")
+
+
+async def get_recurring(ctx: ToolContext, args: RecurringArgs) -> dict:
+    service = _analytics(ctx, args.account_ids)
+    result = await service.recurring(_month(service, args.month), args.months, args.limit, args.category_ids)
+    return result.model_dump(mode="json")
 
 
 async def get_currency_breakdown(ctx: ToolContext, args: PeriodArgs) -> dict:
@@ -362,6 +385,29 @@ READ_TOOLS = (
         description="Сума витрат по місяцях за останні months місяців до month включно і середнє за повні місяці.",
         args=MonthlyArgs,
         handler=get_monthly,
+    ),
+    Tool(
+        name="get_category_history",
+        label="Дивлюся, як змінювались категорії",
+        description=(
+            "Витрати по кожній категорії верхнього рівня за кожен з months місяців до month включно. "
+            "median і average рахуються лише по повних місяцях (complete); active_months - у скількох повних місяцях були витрати. "
+            "Основа для «звичайного місяця», бюджетів і планів заощаджень: бери median, вона не чутлива до разових покупок."
+        ),
+        args=CategoryHistoryArgs,
+        handler=get_category_history,
+    ),
+    Tool(
+        name="get_recurring",
+        label="Шукаю регулярні платежі",
+        description=(
+            "Мерчанти й люди, яким платили щонайменше у двох різних місяцях з months: підписки, сервіси, перекази тим самим людям, "
+            "звичні магазини. months_seen - у скількох місяцях були платежі, typical_amount - медіана одного платежу, "
+            "monthly_amount - медіана суми за місяць, stable_amount - сума майже не змінюється (схоже на підписку). "
+            "Відсортовано за monthly_amount."
+        ),
+        args=RecurringArgs,
+        handler=get_recurring,
     ),
     Tool(
         name="get_insights",

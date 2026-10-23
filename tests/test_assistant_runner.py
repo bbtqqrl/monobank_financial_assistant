@@ -169,6 +169,7 @@ def test_failed_compaction_does_not_trim_history():
 def test_context_uses_user_timezone():
     now = datetime(2026, 10, 22, 23, 30, tzinfo=ZoneInfo("UTC"))
     assert build_context("Europe/Kyiv", "Скільки?", now) == "Now: 2026-10-23 02:30, Friday, user timezone Europe/Kyiv."
+    assert build_context("Europe/Kyiv", "Скільки?", now, owner="Іван Петренко").endswith(" Card owner: Іван Петренко.")
 
 
 @pytest.mark.parametrize(

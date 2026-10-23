@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from anthropic.types.beta import BetaMessage, BetaToolUseBlock
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import ASSISTANT_COMPACTION_TRIGGER_TOKENS
+from app.core.config import ASSISTANT_COMPACTION_TRIGGER_TOKENS, ASSISTANT_EFFORT
 from app.db.models.conversation import Conversation
 from app.db.session import SessionLocal
 from app.repositories.conversation import ConversationRepository
@@ -44,6 +44,7 @@ class AgentRunner:
         conversation: Conversation,
         timezone: str,
         llm: LLMClient | None = None,
+        owner: str | None = None,
         registry: ToolRegistry = READ_REGISTRY,
         session_factory: Callable[[], AsyncSession] = SessionLocal,
     ):
@@ -51,6 +52,7 @@ class AgentRunner:
         self.user_id = user_id
         self.conversation = conversation
         self.timezone = timezone
+        self.owner = owner
         self.llm = llm or LLMClient()
         self.registry = registry
         self.session_factory = session_factory
@@ -64,7 +66,7 @@ class AgentRunner:
         if self.conversation.title is None:
             self.conversation.title = text.strip()[:TITLE_LENGTH]
         await self._append(history, "user", [
-            {"type": "text", "text": f"<context>{build_context(self.timezone, text)}</context>"},
+            {"type": "text", "text": f"<context>{build_context(self.timezone, text, owner=self.owner)}</context>"},
             {"type": "text", "text": text},
         ])
         await self.db.commit()
@@ -80,6 +82,7 @@ class AgentRunner:
                 tool_choice={"type": "none"} if is_last_step else None,
                 user_id=self.user_id,
                 conversation_id=self.conversation.id,
+                effort=ASSISTANT_EFFORT,
                 compaction_trigger=ASSISTANT_COMPACTION_TRIGGER_TOKENS,
             ):
                 if isinstance(event, TextDelta):
