@@ -9,9 +9,11 @@ from anthropic.types.beta import BetaMessage
 from pydantic import BaseModel, ConfigDict
 
 from app.services.assistant.prompts import build_context, build_memories, reply_language
+from app.services.assistant import runner as runner_module
 from app.services.assistant.runner import (
     INTERRUPTED_TEXT,
     MAX_STEPS,
+    ActionProposed,
     AgentRunner,
     Done,
     ToolStarted,
@@ -159,6 +161,45 @@ async def test_interrupted_tool_call_is_closed_before_next_turn():
     assert roles == ["user", "assistant", "user", "assistant", "user"]
     assert llm.calls[0]["messages"][2]["content"][0]["tool_use_id"] == "t9"
     assert llm.calls[0]["messages"][3]["content"][0]["text"] == INTERRUPTED_TEXT
+
+
+async def test_action_update_is_not_treated_as_interrupted_turn():
+    stored = [
+        {"role": "user", "content": [{"type": "text", "text": "постав бюджет"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "Підтверди на картці"}]},
+        {"role": "user", "content": [{"type": "text", "text": "<action_update>Дія #1 (Бюджети): підтвердив.</action_update>"}]},
+    ]
+    llm = FakeLLM([TEXT_STEP])
+    await collect(make_runner(llm, stored), "дякую")
+    assert [m["role"] for m in llm.calls[0]["messages"]] == ["user", "assistant", "user", "user"]
+
+
+async def test_proposing_tool_emits_action_event(monkeypatch):
+    action = {
+        "id": 12, "action_type": "budgets", "preview": {"items": []}, "status": "pending",
+        "result": None, "error": None, "expires_at": "2026-10-26T12:00:00Z",
+    }
+
+    class FakeActions:
+        def __init__(self, db):
+            pass
+
+        async def get_for_user(self, action_id, user_id):
+            return SimpleNamespace(**action) if action_id == 12 else None
+
+    async def propose(ctx, args):
+        return {"action_id": 12, "status": "pending"}
+
+    monkeypatch.setattr(runner_module, "PendingActionRepository", FakeActions)
+    step = message([{"type": "tool_use", "id": "t1", "name": "propose_budgets", "input": {}}], "tool_use")
+    llm = FakeLLM([step, TEXT_STEP])
+    runner = make_runner(llm)
+    runner.registry = ToolRegistry((Tool("propose_budgets", "Готую бюджети", "", NoArgs, propose, proposes=True),))
+    events = await collect(runner, "постав бюджет")
+
+    proposed = [event for event in events if isinstance(event, ActionProposed)]
+    assert [event.action.id for event in proposed] == [12]
+    assert events.index(proposed[0]) < events.index(TextDelta("10 000 ₴"))
 
 
 async def test_failed_turn_without_answer_gets_placeholder():

@@ -65,19 +65,6 @@ class MemoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ReplyError(BaseModel):
-    code: Literal["timeout", "model_unavailable", "internal"]
-    detail: str
-
-
-class ReplyResponse(BaseModel):
-    text: str
-    tools: list[str]
-    message_id: int | None = None
-    stop_reason: str | None = None
-    error: ReplyError | None = None
-
-
 class PendingActionResponse(BaseModel):
     id: int
     action_type: str
@@ -88,3 +75,17 @@ class PendingActionResponse(BaseModel):
     expires_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ReplyError(BaseModel):
+    code: Literal["timeout", "model_unavailable", "internal"]
+    detail: str
+
+
+class ReplyResponse(BaseModel):
+    text: str
+    tools: list[str]
+    actions: list[PendingActionResponse] = []
+    message_id: int | None = None
+    stop_reason: str | None = None
+    error: ReplyError | None = None

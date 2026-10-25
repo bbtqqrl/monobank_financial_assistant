@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
@@ -10,8 +11,11 @@ from app.db.models.conversation import Conversation
 from app.db.session import SessionLocal
 from app.repositories.conversation import ConversationRepository
 from app.repositories.message import MessageRepository
+from app.repositories.pending_action import PendingActionRepository
+from app.schemas.assistant import PendingActionResponse
+from app.services.assistant.actions import ACTION_UPDATE_PREFIX
 from app.services.assistant.prompts import MEMORIES_PREFIX, SYSTEM_PROMPT, build_context, build_memories
-from app.services.assistant.tools import READ_REGISTRY, ToolContext, ToolRegistry
+from app.services.assistant.tools import ASSISTANT_REGISTRY, ToolContext, ToolRegistry
 from app.services.llm.client import Completed, LLMClient, TextDelta, ToolUseStarted
 
 MAX_STEPS = 8
@@ -27,12 +31,17 @@ class ToolStarted:
 
 
 @dataclass(frozen=True)
+class ActionProposed:
+    action: PendingActionResponse
+
+
+@dataclass(frozen=True)
 class Done:
     message_id: int
     stop_reason: str | None
 
 
-AgentEvent = TextDelta | ToolStarted | Done
+AgentEvent = TextDelta | ToolStarted | ActionProposed | Done
 
 
 class AgentRunner:
@@ -46,7 +55,7 @@ class AgentRunner:
         llm: LLMClient | None = None,
         owner: str | None = None,
         memories: list[tuple[int, str]] | None = None,
-        registry: ToolRegistry = READ_REGISTRY,
+        registry: ToolRegistry = ASSISTANT_REGISTRY,
         session_factory: Callable[[], AsyncSession] = SessionLocal,
     ):
         self.db = db
@@ -105,23 +114,34 @@ class AgentRunner:
 
             await self.db.commit()
             results = await asyncio.gather(*(self._run_tool(block) for block in tool_uses))
-            await self._append(history, "user", list(results))
+            await self._append(history, "user", [result for result, _ in results])
             await self.db.commit()
+            for _, action in results:
+                if action is not None:
+                    yield ActionProposed(action)
 
-    async def _run_tool(self, block: BetaToolUseBlock) -> dict:
+    async def _run_tool(self, block: BetaToolUseBlock) -> tuple[dict, PendingActionResponse | None]:
+        action = None
         async with self.session_factory() as db:
             content, is_error = await self.registry.run(
-                ToolContext(db, self.user_id, self.timezone, self.conversation.id), block.name, block.input,
+                ToolContext(db, self.user_id, self.timezone, self.conversation.id, block.id), block.name, block.input,
             )
+            if not is_error and self.registry.proposes(block.name):
+                proposed = await PendingActionRepository(db).get_for_user(json.loads(content)["action_id"], self.user_id)
+                action = PendingActionResponse.model_validate(proposed)
         result = {"type": "tool_result", "tool_use_id": block.id, "content": content}
         if is_error:
             result["is_error"] = True
-        return result
+        return result, action
 
     async def _close_interrupted_turn(self, history: list[dict]) -> None:
         if not history:
             return
         last = history[-1]
+        if last["role"] == "user" and all(
+            block.get("type") == "text" and block["text"].startswith(ACTION_UPDATE_PREFIX) for block in last["content"]
+        ):
+            return
         if last["role"] == "assistant":
             pending = [block["id"] for block in last["content"] if block.get("type") == "tool_use"]
             if not pending:
