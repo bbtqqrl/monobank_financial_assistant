@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_CONTROL = {"type": "ephemeral"}
 COMPACTION_BETA = "compact-2026-01-12"
+THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
+THINKING = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -72,11 +74,12 @@ class LLMClient:
             }]}
         try:
             async with self._client.beta.messages.stream(
-                betas=[COMPACTION_BETA],
+                betas=[COMPACTION_BETA, THINKING_BINDING_BETA],
                 context_management=context_management,
                 model=model,
                 max_tokens=max_tokens,
                 system=[{"type": "text", "text": system, "cache_control": CACHE_CONTROL}],
+                thinking=THINKING,
                 messages=messages,
                 tools=tools or omit,
                 tool_choice=tool_choice or omit,
