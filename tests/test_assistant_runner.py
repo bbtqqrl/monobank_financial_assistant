@@ -8,7 +8,7 @@ import pytest
 from anthropic.types.beta import BetaMessage
 from pydantic import BaseModel, ConfigDict
 
-from app.services.assistant.prompts import build_context, reply_language
+from app.services.assistant.prompts import build_context, build_memories, reply_language
 from app.services.assistant.runner import (
     INTERRUPTED_TEXT,
     MAX_STEPS,
@@ -112,9 +112,39 @@ async def test_tool_loop_runs_tool_and_answers():
 async def test_user_message_carries_context_block():
     llm = FakeLLM([TEXT_STEP])
     await collect(make_runner(llm), "привіт")
-    first_block, text_block = llm.calls[0]["messages"][0]["content"]
+    memories_block, first_block, text_block = llm.calls[0]["messages"][0]["content"]
+    assert memories_block["text"].startswith("<memories>")
     assert first_block["text"].startswith("<context>") and "Europe/Kyiv" in first_block["text"]
     assert text_block == {"type": "text", "text": "привіт"}
+
+
+async def test_memories_are_sent_once_until_they_change_and_tools_get_conversation():
+    seen = []
+
+    async def spy(ctx, args):
+        seen.append(ctx.conversation_id)
+        return {}
+
+    memories = "<memories>\n[3] Зарплата 32 000 ₴ на іншу картку\n</memories>"
+    llm = FakeLLM([TOOL_STEP, TEXT_STEP, TEXT_STEP, TEXT_STEP])
+    runner = make_runner(llm)
+    runner.registry = ToolRegistry((Tool("get_spending", "Рахую витрати", "", NoArgs, spy),))
+    runner.memories = [(3, "Зарплата 32 000 ₴ на іншу картку")]
+    await collect(runner, "привіт")
+    await collect(runner, "ще")
+    runner.memories = [(3, "Зарплата 38 000 ₴ на іншу картку")]
+    await collect(runner, "і ще")
+
+    first, second, third = (call["messages"][-1]["content"] for call in (llm.calls[0], llm.calls[2], llm.calls[3]))
+    assert first[0]["text"] == memories and first[1]["text"].startswith("<context>")
+    assert second[0]["text"].startswith("<context>")
+    assert "38 000" in third[0]["text"]
+    assert all(call["system"] == llm.calls[0]["system"] for call in llm.calls)
+    assert seen == [1]
+
+
+def test_empty_memories_block():
+    assert build_memories([]) == "<memories>\nПоки нічого.\n</memories>"
 
 
 async def test_interrupted_tool_call_is_closed_before_next_turn():

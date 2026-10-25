@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.assistant import ConversationResponse, MessageListResponse, ReplyResponse, SendMessageRequest
+from app.schemas.assistant import (
+    ConversationResponse,
+    MemoryResponse,
+    MessageListResponse,
+    ReplyResponse,
+    SendMessageRequest,
+)
 from app.services.assistant.chat_service import AssistantService, collect, to_sse
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
@@ -69,3 +75,20 @@ async def send_message(
     if not stream:
         return await collect(events)
     return StreamingResponse(to_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.get("/memories", response_model=list[MemoryResponse])
+async def list_memories(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AssistantService(db, current_user.id).list_memories()
+
+
+@router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_memory(
+    memory_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await AssistantService(db, current_user.id).delete_memory(memory_id)

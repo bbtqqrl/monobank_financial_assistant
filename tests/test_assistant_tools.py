@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.services.analytics_service import Period, PeriodError
 from app.services.assistant.tools import (
+    MEMORY_TOOLS,
     READ_TOOLS,
     CompareArgs,
     Tool,
@@ -88,10 +89,10 @@ def test_month_compares_with_previous_month_by_default():
     assert _comparison(period, CompareArgs(date_from=period.start, date_to=period.end)).type == "previous_period"
 
 
-def test_read_tools_have_unique_names_and_object_schemas():
-    names = [tool.name for tool in READ_TOOLS]
+def test_tools_have_unique_names_and_object_schemas():
+    names = [tool.name for tool in READ_TOOLS + MEMORY_TOOLS]
     assert len(names) == len(set(names))
-    for tool in READ_TOOLS:
+    for tool in READ_TOOLS + MEMORY_TOOLS:
         definition = tool.definition()
         assert definition["input_schema"]["type"] == "object"
         assert "user_id" not in json.dumps(definition["input_schema"])

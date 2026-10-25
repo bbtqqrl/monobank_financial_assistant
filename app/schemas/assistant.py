@@ -56,6 +56,15 @@ class MessageListResponse(BaseModel):
     has_more: bool
 
 
+class MemoryResponse(BaseModel):
+    id: int
+    text: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ReplyError(BaseModel):
     code: Literal["timeout", "model_unavailable", "internal"]
     detail: str
