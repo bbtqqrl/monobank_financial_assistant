@@ -7,11 +7,13 @@ import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { useSession } from '@/api/auth';
 import { queryClient } from '@/api/query';
 import { loadTokens } from '@/api/tokens';
 import { loadCardPrefs } from '@/lib/cardOrder';
+import { loadChatTitles } from '@/lib/chatTitles';
 import { FONT_FILES } from '@/lib/fonts';
 import { loadSecurityPrefs } from '@/lib/security';
 import { useTheme, withAlpha } from '@/theme';
@@ -31,7 +33,9 @@ export default function RootLayout() {
 
   useEffect(() => {
     loadTokens();
-    Promise.all([loadThemePref(), loadCardPrefs(), loadSecurityPrefs()]).finally(() => setSettingsLoaded(true));
+    Promise.all([loadThemePref(), loadCardPrefs(), loadSecurityPrefs(), loadChatTitles()]).finally(() =>
+      setSettingsLoaded(true),
+    );
   }, []);
 
   useEffect(() => {
@@ -62,45 +66,52 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <ThemeProvider value={navTheme}>
-        <QueryClientProvider client={queryClient}>
-          <StatusBar style={dark ? 'light' : 'dark'} />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: c.bg },
-            }}
-          >
-            <Stack.Protected guard={signedIn}>
-              <Stack.Screen name="(tabs)" />
-              {/* its button is top left, so it comes in from the left (and swipes back to it) */}
-              <Stack.Screen name="profile" options={{ animation: 'slide_from_left' }} />
-              <Stack.Screen name="security" />
-              <Stack.Screen name="pin" />
-              <Stack.Screen name="transaction/[id]/index" />
-              <Stack.Screen name="transaction/[id]/category" options={sheet([0.75, 1])} />
-              <Stack.Screen name="new/index" options={sheet([1])} />
-              <Stack.Screen name="new/category" options={sheet([0.75, 1])} />
-              <Stack.Screen name="cards" options={sheet('fitToContents')} />
-              <Stack.Screen name="theme" options={sheet('fitToContents')} />
-              <Stack.Screen name="budget/[id]" />
-              <Stack.Screen name="jars" />
-              <Stack.Screen name="jar/[id]" />
-              {/* a new one needs the whole height, changing a limit only its content */}
-              <Stack.Screen
-                name="budget/index"
-                options={({ route }) => sheet((route.params as { id?: string } | undefined)?.id ? 'fitToContents' : [1])}
-              />
-              <Stack.Screen name="budget/category" options={sheet([0.75, 1])} />
-            </Stack.Protected>
-            <Stack.Protected guard={!signedIn}>
-              <Stack.Screen name="login" />
-            </Stack.Protected>
-          </Stack>
-          {signedIn ? <AppLock /> : null}
-          <ThemeFade />
-        </QueryClientProvider>
-      </ThemeProvider>
+      <KeyboardProvider>
+        <ThemeProvider value={navTheme}>
+          <QueryClientProvider client={queryClient}>
+            <StatusBar style={dark ? 'light' : 'dark'} />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: c.bg },
+              }}
+            >
+              <Stack.Protected guard={signedIn}>
+                <Stack.Screen name="(tabs)" />
+                {/* its button is top left, so it comes in from the left (and swipes back to it) */}
+                <Stack.Screen name="profile" options={{ animation: 'slide_from_left' }} />
+                <Stack.Screen name="security" />
+                <Stack.Screen name="pin" />
+                <Stack.Screen name="transaction/[id]/index" />
+                <Stack.Screen name="transaction/[id]/category" options={sheet([0.75, 1])} />
+                <Stack.Screen name="new/index" options={sheet([1])} />
+                <Stack.Screen name="new/category" options={sheet([0.75, 1])} />
+                <Stack.Screen name="cards" options={sheet('fitToContents')} />
+                <Stack.Screen name="theme" options={sheet('fitToContents')} />
+                <Stack.Screen name="assistant-history" options={sheet([0.6, 1])} />
+                <Stack.Screen name="budget/[id]" />
+                <Stack.Screen name="jars" />
+                <Stack.Screen name="spending/[id]" />
+                <Stack.Screen name="merchants" />
+                <Stack.Screen name="jar/[id]" />
+                {/* a new one needs the whole height, changing a limit only its content */}
+                <Stack.Screen
+                  name="budget/index"
+                  options={({ route }) =>
+                    sheet((route.params as { id?: string } | undefined)?.id ? 'fitToContents' : [1])
+                  }
+                />
+                <Stack.Screen name="budget/category" options={sheet([0.75, 1])} />
+              </Stack.Protected>
+              <Stack.Protected guard={!signedIn}>
+                <Stack.Screen name="login" />
+              </Stack.Protected>
+            </Stack>
+            {signedIn ? <AppLock /> : null}
+            <ThemeFade />
+          </QueryClientProvider>
+        </ThemeProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

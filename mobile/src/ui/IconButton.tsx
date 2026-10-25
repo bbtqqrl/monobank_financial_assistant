@@ -13,11 +13,13 @@ export type IconButtonProps = {
   // unread marker in the corner
   dot?: boolean;
   weight?: number;
+  // shown but not usable right now, so nothing jumps when it comes back
+  disabled?: boolean;
 };
 
 const SIZE = 44;
 
-export function IconButton({ icon, label, onPress, dot = false, weight }: IconButtonProps) {
+export function IconButton({ icon, label, onPress, dot = false, weight, disabled = false }: IconButtonProps) {
   const { c } = useTheme();
   const pressed = useSharedValue(0);
   const style = useAnimatedStyle(() => ({ transform: [{ scale: 1 - pressed.value * 0.08 }] }));
@@ -26,12 +28,14 @@ export function IconButton({ icon, label, onPress, dot = false, weight }: IconBu
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       hitSlop={6}
       onPress={onPress}
       onPressIn={() => pressed.set(withTiming(1, { duration: 90 }))}
       onPressOut={() => pressed.set(withTiming(0, { duration: 180 }))}
     >
-      <Animated.View style={style}>
+      <Animated.View style={[style, disabled && styles.disabled]}>
         <Glass radius={15} style={styles.size} contentStyle={styles.center}>
           <Icon name={icon} size={20} weight={weight} />
           {dot ? (
@@ -46,6 +50,7 @@ export function IconButton({ icon, label, onPress, dot = false, weight }: IconBu
 const styles = StyleSheet.create({
   size: { width: SIZE, height: SIZE },
   center: { alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.4 },
   // Figma puts it at 25,11 of the button, the glass border takes 1pt
   dot: { position: 'absolute', left: 24, top: 10, width: 7, height: 7, borderRadius: 4, borderWidth: 1.5 },
 });
