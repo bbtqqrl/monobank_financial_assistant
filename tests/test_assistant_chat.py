@@ -56,6 +56,15 @@ async def test_collect_merges_events_into_one_reply():
     assert (reply.text, reply.tools, reply.message_id, reply.error) == ("10 000 ₴", ["get_spending"], 7, None)
 
 
+async def test_collect_keeps_proposed_actions():
+    action = {
+        "id": 3, "action_type": "budgets", "preview": {"items": []}, "status": "pending",
+        "result": None, "error": None, "expires_at": "2026-10-26T12:00:00Z",
+    }
+    reply = await collect(events(("action", action), ("delta", {"text": "Підтверди"})))
+    assert [item.id for item in reply.actions] == [3] and reply.text == "Підтверди"
+
+
 async def test_collect_keeps_error():
     reply = await collect(events(("delta", {"text": "10"}), ("error", {"code": "timeout", "detail": "x"})))
     assert reply.text == "10" and reply.error.code == "timeout" and reply.message_id is None

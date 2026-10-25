@@ -9,6 +9,7 @@ from app.schemas.assistant import (
     ConversationResponse,
     MemoryResponse,
     MessageListResponse,
+    PendingActionResponse,
     ReplyResponse,
     SendMessageRequest,
 )
@@ -61,7 +62,7 @@ async def list_messages(
     "/conversations/{conversation_id}/messages",
     responses={200: {
         "content": {"text/event-stream": {}, "application/json": {"schema": ReplyResponse.model_json_schema()}},
-        "description": "SSE: tool, delta, done, error; з stream=false — одна JSON-відповідь",
+        "description": "SSE: tool, delta, action, done, error; з stream=false — одна JSON-відповідь",
     }},
 )
 async def send_message(
@@ -92,3 +93,30 @@ async def delete_memory(
     db: AsyncSession = Depends(get_db),
 ):
     await AssistantService(db, current_user.id).delete_memory(memory_id)
+
+
+@router.get("/conversations/{conversation_id}/actions", response_model=list[PendingActionResponse])
+async def list_actions(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AssistantService(db, current_user.id).list_actions(conversation_id)
+
+
+@router.post("/actions/{action_id}/confirm", response_model=PendingActionResponse)
+async def confirm_action(
+    action_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AssistantService(db, current_user.id).confirm_action(action_id)
+
+
+@router.post("/actions/{action_id}/reject", response_model=PendingActionResponse)
+async def reject_action(
+    action_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AssistantService(db, current_user.id).reject_action(action_id)

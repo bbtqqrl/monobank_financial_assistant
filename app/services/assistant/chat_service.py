@@ -21,19 +21,21 @@ from app.schemas.assistant import (
     ConversationResponse,
     MemoryResponse,
     MessageListResponse,
+    PendingActionResponse,
     MessageResponse,
     ReplyError,
     ReplyResponse,
 )
+from app.services.assistant.actions import ACTION_UPDATE_PREFIX, ActionService
 from app.services.assistant.memory_extractor import MemoryExtractor
 from app.services.assistant.prompts import MEMORIES_PREFIX
-from app.services.assistant.runner import AgentRunner, Done, ToolStarted
+from app.services.assistant.runner import ActionProposed, AgentRunner, Done, ToolStarted
 from app.services.errors import ConflictError, NotFoundError, TooManyRequestsError
 from app.services.llm.client import TextDelta
 
 logger = logging.getLogger(__name__)
 
-HIDDEN_PREFIXES = ("<context>", MEMORIES_PREFIX)
+HIDDEN_PREFIXES = ("<context>", MEMORIES_PREFIX, ACTION_UPDATE_PREFIX)
 
 _busy_conversations: set[int] = set()
 _background_tasks: set[asyncio.Task] = set()
@@ -88,6 +90,25 @@ class AssistantService:
         queue: asyncio.Queue = asyncio.Queue()
         _spawn(_run_agent(self.user_id, conversation.id, text, timezone, queue))
         return _stream(queue)
+
+    async def list_actions(self, conversation_id: int) -> list[PendingActionResponse]:
+        conversation = await self._get(conversation_id)
+        return await ActionService(self.db, self.user_id).list_for_conversation(conversation.id)
+
+    async def confirm_action(self, action_id: int) -> PendingActionResponse:
+        actions = ActionService(self.db, self.user_id)
+        self._ensure_idle((await actions.get(action_id)).conversation_id)
+        return await actions.confirm(action_id)
+
+    async def reject_action(self, action_id: int) -> PendingActionResponse:
+        actions = ActionService(self.db, self.user_id)
+        self._ensure_idle((await actions.get(action_id)).conversation_id)
+        return await actions.reject(action_id)
+
+    @staticmethod
+    def _ensure_idle(conversation_id: int) -> None:
+        if conversation_id in _busy_conversations:
+            raise ConflictError("Assistant is still answering in this conversation")
 
     async def list_memories(self) -> list[MemoryResponse]:
         return [MemoryResponse.model_validate(memory) for memory in await self.memories.list_for_user(self.user_id)]
@@ -162,6 +183,8 @@ def _to_event(event) -> tuple[str, dict]:
         return "delta", {"text": event.text}
     if isinstance(event, ToolStarted):
         return "tool", {"name": event.name, "label": event.label}
+    if isinstance(event, ActionProposed):
+        return "action", event.action.model_dump(mode="json")
     if isinstance(event, Done):
         return "done", {"message_id": event.message_id, "stop_reason": event.stop_reason}
     raise TypeError(f"Unknown agent event: {event!r}")
@@ -173,12 +196,14 @@ async def to_sse(events: AsyncIterator[tuple[str, dict]]) -> AsyncIterator[str]:
 
 
 async def collect(events: AsyncIterator[tuple[str, dict]]) -> ReplyResponse:
-    reply = ReplyResponse(text="", tools=[])
+    reply = ReplyResponse(text="", tools=[], actions=[])
     async for name, data in events:
         if name == "delta":
             reply.text += data["text"]
         elif name == "tool":
             reply.tools.append(data["name"])
+        elif name == "action":
+            reply.actions.append(PendingActionResponse(**data))
         elif name == "done":
             reply.message_id, reply.stop_reason = data["message_id"], data["stop_reason"]
         elif name == "error":

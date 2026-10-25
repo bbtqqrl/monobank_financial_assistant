@@ -16,6 +16,7 @@ from app.repositories.account import AccountRepository
 from app.repositories.jar import JarRepository
 from app.repositories.memory import MemoryRepository
 from app.repositories.transaction import TransactionRepository
+from app.schemas.budget import MAX_BUDGET_AMOUNT
 from app.schemas.analytics import ComparePreset
 from app.services.analytics_service import (
     AnalyticsService,
@@ -26,6 +27,7 @@ from app.services.analytics_service import (
     resolve_comparison,
     resolve_period,
 )
+from app.services.assistant.actions import MAX_BUDGET_ITEMS, ActionService, BudgetChange, BudgetsPayload
 from app.services.budget_service import BudgetService
 from app.services.category_service import CategoryService
 from app.services.errors import ServiceError
@@ -38,6 +40,7 @@ CURRENCY_CODES = {alpha: numeric for numeric, alpha in ISO_ALPHA.items()}
 MONEY_KEYS = frozenset({
     "total", "total_uah", "expected", "amount", "amount_uah", "operation_amount", "current", "baseline", "diff",
     "average", "balance", "credit_limit", "goal", "current_amount", "median", "typical_amount", "monthly_amount",
+    "old_amount", "new_amount",
 })
 ACCOUNT_TYPE_NAMES = {
     "black": "Чорна картка",
@@ -61,6 +64,7 @@ class ToolContext:
     user_id: int
     timezone: str
     conversation_id: int | None = None
+    tool_use_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,7 @@ class Tool:
     description: str
     args: type[BaseModel]
     handler: Callable[[ToolContext, Any], Awaitable[Any]]
+    proposes: bool = False
 
     def definition(self) -> ToolParam:
         return {"name": self.name, "description": self.description, "input_schema": self.args.model_json_schema()}
@@ -166,6 +171,22 @@ class ForgetArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(description="id спогаду з <memories>.")
+
+
+class BudgetItemArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: int = Field(description="Категорія витрат: id з get_category_tree або get_budgets.")
+    amount: float | None = Field(
+        default=None, gt=0, le=MAX_BUDGET_AMOUNT / 100,
+        description="Місячний ліміт у гривнях. null - видалити бюджет цієї категорії.",
+    )
+
+
+class ProposeBudgetsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BudgetItemArgs] = Field(min_length=1, max_length=MAX_BUDGET_ITEMS)
 
 
 class SearchTransactionsArgs(BaseModel):
@@ -352,6 +373,22 @@ async def search_transactions(ctx: ToolContext, args: SearchTransactionsArgs) ->
     return result
 
 
+async def propose_budgets(ctx: ToolContext, args: ProposeBudgetsArgs) -> dict:
+    if ctx.conversation_id is None:
+        raise ToolError("Actions are available only in a conversation")
+    payload = BudgetsPayload(items=[
+        BudgetChange(category_id=item.category_id, amount=None if item.amount is None else round(item.amount * 100))
+        for item in args.items
+    ])
+    action = await ActionService(ctx.db, ctx.user_id).propose(ctx.conversation_id, ctx.tool_use_id, "budgets", payload)
+    return {
+        "action_id": action.id,
+        "status": "pending",
+        "preview": action.preview,
+        "note": "Nothing is changed yet: the user sees a card with confirm and reject buttons.",
+    }
+
+
 async def remember(ctx: ToolContext, args: RememberArgs) -> dict:
     memories = MemoryRepository(ctx.db)
     if await memories.count_for_user(ctx.user_id) >= MAX_MEMORIES:
@@ -513,6 +550,21 @@ READ_TOOLS = (
 )
 
 
+ACTION_TOOLS = (
+    Tool(
+        name="propose_budgets",
+        label="Готую бюджети",
+        description=(
+            "Запропонувати створити, змінити або видалити місячні бюджети по категоріях одним пакетом. "
+            "Нічого не змінює: користувач отримує картку з превʼю і підтверджує або відхиляє її сам. "
+            "Існуючий бюджет категорії оновлюється, новий створюється."
+        ),
+        args=ProposeBudgetsArgs,
+        handler=propose_budgets,
+        proposes=True,
+    ),
+)
+
 MEMORY_TOOLS = (
     Tool(
         name="remember",
@@ -550,6 +602,10 @@ class ToolRegistry:
     def definitions(self) -> list[ToolParam]:
         return self._definitions
 
+    def proposes(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool is not None and tool.proposes
+
     def label(self, name: str) -> str:
         tool = self._tools.get(name)
         return tool.label if tool else name
@@ -583,4 +639,5 @@ def _to_major_units(value: Any) -> Any:
 
 
 READ_REGISTRY = ToolRegistry(READ_TOOLS)
+ASSISTANT_REGISTRY = ToolRegistry(READ_TOOLS + ACTION_TOOLS)
 MEMORY_REGISTRY = ToolRegistry(MEMORY_TOOLS)
