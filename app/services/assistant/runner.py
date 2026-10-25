@@ -10,7 +10,7 @@ from app.db.models.conversation import Conversation
 from app.db.session import SessionLocal
 from app.repositories.conversation import ConversationRepository
 from app.repositories.message import MessageRepository
-from app.services.assistant.prompts import SYSTEM_PROMPT, build_context
+from app.services.assistant.prompts import MEMORIES_PREFIX, SYSTEM_PROMPT, build_context, build_memories
 from app.services.assistant.tools import READ_REGISTRY, ToolContext, ToolRegistry
 from app.services.llm.client import Completed, LLMClient, TextDelta, ToolUseStarted
 
@@ -45,6 +45,7 @@ class AgentRunner:
         timezone: str,
         llm: LLMClient | None = None,
         owner: str | None = None,
+        memories: list[tuple[int, str]] | None = None,
         registry: ToolRegistry = READ_REGISTRY,
         session_factory: Callable[[], AsyncSession] = SessionLocal,
     ):
@@ -53,6 +54,7 @@ class AgentRunner:
         self.conversation = conversation
         self.timezone = timezone
         self.owner = owner
+        self.memories = memories or []
         self.llm = llm or LLMClient()
         self.registry = registry
         self.session_factory = session_factory
@@ -65,10 +67,11 @@ class AgentRunner:
 
         if self.conversation.title is None:
             self.conversation.title = text.strip()[:TITLE_LENGTH]
-        await self._append(history, "user", [
-            {"type": "text", "text": f"<context>{build_context(self.timezone, text, owner=self.owner)}</context>"},
-            {"type": "text", "text": text},
-        ])
+        blocks = [{"type": "text", "text": f"<context>{build_context(self.timezone, text, owner=self.owner)}</context>"}]
+        memories = build_memories(self.memories)
+        if memories != _last_memories(history):
+            blocks.insert(0, {"type": "text", "text": memories})
+        await self._append(history, "user", [*blocks, {"type": "text", "text": text}])
         await self.db.commit()
 
         for step in range(MAX_STEPS):
@@ -108,7 +111,7 @@ class AgentRunner:
     async def _run_tool(self, block: BetaToolUseBlock) -> dict:
         async with self.session_factory() as db:
             content, is_error = await self.registry.run(
-                ToolContext(db, self.user_id, self.timezone), block.name, block.input,
+                ToolContext(db, self.user_id, self.timezone, self.conversation.id), block.name, block.input,
             )
         result = {"type": "tool_result", "tool_use_id": block.id, "content": content}
         if is_error:
@@ -148,3 +151,13 @@ def _since_last_compaction(history: list[dict]) -> list[dict]:
 def _content(message: BetaMessage) -> list[dict]:
     content = [block.model_dump(mode="json", exclude_none=True) for block in message.content]
     return content or [{"type": "text", "text": INTERRUPTED_TEXT}]
+
+
+def _last_memories(history: list[dict]) -> str | None:
+    for message in reversed(history):
+        if message["role"] != "user":
+            continue
+        for block in message["content"]:
+            if block.get("type") == "text" and block["text"].startswith(MEMORIES_PREFIX):
+                return block["text"]
+    return None

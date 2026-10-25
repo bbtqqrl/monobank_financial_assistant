@@ -11,8 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.currencies import ISO_ALPHA, UAH, alpha_code
+from app.db.models.memory import MAX_MEMORY_LENGTH
 from app.repositories.account import AccountRepository
 from app.repositories.jar import JarRepository
+from app.repositories.memory import MemoryRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.analytics import ComparePreset
 from app.services.analytics_service import (
@@ -31,6 +33,7 @@ from app.services.errors import ServiceError
 logger = logging.getLogger(__name__)
 
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+MAX_MEMORIES = 50
 CURRENCY_CODES = {alpha: numeric for numeric, alpha in ISO_ALPHA.items()}
 MONEY_KEYS = frozenset({
     "total", "total_uah", "expected", "amount", "amount_uah", "operation_amount", "current", "baseline", "diff",
@@ -57,6 +60,7 @@ class ToolContext:
     db: AsyncSession
     user_id: int
     timezone: str
+    conversation_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,25 @@ class CategoryTreeArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["expense", "income", "transfer"] | None = Field(default=None, description="Тільки категорії цього типу.")
+
+
+class RememberArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(
+        min_length=1, max_length=MAX_MEMORY_LENGTH,
+        description="Один факт коротким реченням від третьої особи, з цифрами і датою, якщо вони важливі.",
+    )
+
+
+class UpdateMemoryArgs(RememberArgs):
+    id: int = Field(description="id спогаду з <memories>.")
+
+
+class ForgetArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(description="id спогаду з <memories>.")
 
 
 class SearchTransactionsArgs(BaseModel):
@@ -329,6 +352,35 @@ async def search_transactions(ctx: ToolContext, args: SearchTransactionsArgs) ->
     return result
 
 
+async def remember(ctx: ToolContext, args: RememberArgs) -> dict:
+    memories = MemoryRepository(ctx.db)
+    if await memories.count_for_user(ctx.user_id) >= MAX_MEMORIES:
+        raise ToolError("Memory is full: update or forget an outdated memory first")
+    memory = await memories.create(ctx.user_id, args.text.strip(), ctx.conversation_id)
+    await ctx.db.commit()
+    return {"id": memory.id, "status": "saved"}
+
+
+async def update_memory(ctx: ToolContext, args: UpdateMemoryArgs) -> dict:
+    memories = MemoryRepository(ctx.db)
+    memory = await memories.get_for_user(args.id, ctx.user_id)
+    if memory is None:
+        raise ToolError(f"Memory {args.id} not found")
+    memories.update(memory, args.text.strip())
+    await ctx.db.commit()
+    return {"id": memory.id, "status": "updated"}
+
+
+async def forget(ctx: ToolContext, args: ForgetArgs) -> dict:
+    memories = MemoryRepository(ctx.db)
+    memory = await memories.get_for_user(args.id, ctx.user_id)
+    if memory is None:
+        raise ToolError(f"Memory {args.id} not found")
+    await memories.delete(memory)
+    await ctx.db.commit()
+    return {"id": args.id, "status": "forgotten"}
+
+
 def _transaction_item(transaction, category, account_currency: int, zone: ZoneInfo) -> dict:
     item = {
         "id": transaction.id,
@@ -461,6 +513,33 @@ READ_TOOLS = (
 )
 
 
+MEMORY_TOOLS = (
+    Tool(
+        name="remember",
+        label="Запам'ятовую",
+        description=(
+            "Зберегти новий факт про користувача. Якщо схожий факт уже є в <memories>, використай update_memory."
+        ),
+        args=RememberArgs,
+        handler=remember,
+    ),
+    Tool(
+        name="update_memory",
+        label="Оновлюю те, що пам'ятаю",
+        description="Замінити текст спогаду, коли факт змінився або уточнився.",
+        args=UpdateMemoryArgs,
+        handler=update_memory,
+    ),
+    Tool(
+        name="forget",
+        label="Забуваю",
+        description="Видалити спогад, коли він більше не правда або користувач просить забути.",
+        args=ForgetArgs,
+        handler=forget,
+    ),
+)
+
+
 class ToolRegistry:
 
     def __init__(self, tools: tuple[Tool, ...]):
@@ -504,3 +583,4 @@ def _to_major_units(value: Any) -> Any:
 
 
 READ_REGISTRY = ToolRegistry(READ_TOOLS)
+MEMORY_REGISTRY = ToolRegistry(MEMORY_TOOLS)
