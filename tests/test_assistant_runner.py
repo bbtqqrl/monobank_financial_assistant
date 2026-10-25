@@ -239,14 +239,16 @@ def test_failed_compaction_does_not_trim_history():
 
 def test_context_uses_user_timezone():
     now = datetime(2026, 10, 22, 23, 30, tzinfo=ZoneInfo("UTC"))
-    assert build_context("Europe/Kyiv", "Скільки?", now) == "Now: 2026-10-23 02:30, Friday, user timezone Europe/Kyiv."
-    assert build_context("Europe/Kyiv", "Скільки?", now, owner="Іван Петренко").endswith(" Card owner: Іван Петренко.")
+    assert build_context("Europe/Kyiv", "Скільки?", now) == (
+        "Now: 2026-10-23 02:30, Friday, user timezone Europe/Kyiv. Reply language: Ukrainian."
+    )
+    assert " Card owner: Іван Петренко." in build_context("Europe/Kyiv", "Скільки?", now, owner="Іван Петренко")
 
 
 @pytest.mark.parametrize(
     ("text", "language"),
-    [("Скільки я витратив?", None), ("How much did I spend?", "English"), ("Ile wydałem?", "Polish"),
-     ("Скільки на Netflix?", None), ("2026-09?", None)],
+    [("Скільки я витратив?", "Ukrainian"), ("How much did I spend?", "English"), ("Ile wydałem?", "Polish"),
+     ("Скільки на Netflix?", "Ukrainian"), ("Сколько я потратил?", "Ukrainian"), ("2026-09?", "Ukrainian")],
 )
 def test_reply_language_hint(text, language):
     assert reply_language(text) == language
