@@ -1,7 +1,8 @@
 import json
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict
+import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.services.analytics_service import Period, PeriodError
 from app.services.assistant.tools import (
@@ -96,3 +97,20 @@ def test_tools_have_unique_names_and_object_schemas():
         definition = tool.definition()
         assert definition["input_schema"]["type"] == "object"
         assert "user_id" not in json.dumps(definition["input_schema"])
+
+
+def test_action_args_convert_to_kopecks_and_local_time():
+    from datetime import datetime
+
+    from app.services.assistant.tools import _kopecks, _timestamp
+
+    assert _kopecks(-10000) == -1000000 and _kopecks(12.35) == 1235 and _kopecks(None) is None
+    assert _timestamp(CTX, datetime(2026, 10, 20, 12, 0)) == int(datetime.fromisoformat("2026-10-20T12:00+03:00").timestamp())
+
+
+def test_transaction_edit_needs_some_change():
+    from app.services.assistant.actions import TransactionEditPayload
+
+    with pytest.raises(ValidationError):
+        TransactionEditPayload(transaction_id=1)
+    assert TransactionEditPayload(transaction_id=1, amount=-60000).amount == -60000

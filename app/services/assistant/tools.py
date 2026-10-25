@@ -10,6 +10,7 @@ from anthropic.types import ToolParam
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import ASSISTANT_ACTIONS_NEED_CONFIRMATION
 from app.core.currencies import ISO_ALPHA, UAH, alpha_code
 from app.db.models.memory import MAX_MEMORY_LENGTH
 from app.repositories.account import AccountRepository
@@ -17,6 +18,7 @@ from app.repositories.jar import JarRepository
 from app.repositories.memory import MemoryRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.budget import MAX_BUDGET_AMOUNT
+from app.schemas.transaction import MAX_ABS_AMOUNT
 from app.schemas.analytics import ComparePreset
 from app.services.analytics_service import (
     AnalyticsService,
@@ -27,7 +29,18 @@ from app.services.analytics_service import (
     resolve_comparison,
     resolve_period,
 )
-from app.services.assistant.actions import MAX_BUDGET_ITEMS, ActionService, BudgetChange, BudgetsPayload
+from app.services.assistant.actions import (
+    MAX_BUDGET_ITEMS,
+    MAX_RECATEGORIZE_ITEMS,
+    ActionService,
+    BudgetChange,
+    BudgetsPayload,
+    CategoryChange,
+    RecategorizePayload,
+    TransactionCreatePayload,
+    TransactionDeletePayload,
+    TransactionEditPayload,
+)
 from app.services.budget_service import BudgetService
 from app.services.category_service import CategoryService
 from app.services.errors import ServiceError
@@ -187,6 +200,52 @@ class ProposeBudgetsArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[BudgetItemArgs] = Field(min_length=1, max_length=MAX_BUDGET_ITEMS)
+
+
+class ProposeTransactionArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=500, description="Що це: «Оренда квартири», «Спортзал».")
+    amount: float = Field(
+        ge=-MAX_ABS_AMOUNT / 100, le=MAX_ABS_AMOUNT / 100,
+        description="Сума в гривнях: від'ємна - витрата, додатна - дохід.",
+    )
+    category_id: int = Field(description="Категорія з get_category_tree.")
+    time: datetime | None = Field(default=None, description="Місцевий час YYYY-MM-DDTHH:MM. Без нього - зараз.")
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class RecategorizeItemArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_id: int = Field(description="id з search_transactions.")
+    category_id: int = Field(description="Нова категорія з get_category_tree.")
+
+
+class RecategorizeArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[RecategorizeItemArgs] = Field(min_length=1, max_length=MAX_RECATEGORIZE_ITEMS)
+
+
+class EditTransactionArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_id: int = Field(description="id ручної транзакції з search_transactions.")
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    amount: float | None = Field(
+        default=None, ge=-MAX_ABS_AMOUNT / 100, le=MAX_ABS_AMOUNT / 100,
+        description="Нова сума в гривнях: від'ємна - витрата, додатна - дохід.",
+    )
+    category_id: int | None = None
+    time: datetime | None = Field(default=None, description="Новий місцевий час YYYY-MM-DDTHH:MM.")
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class TransactionIdArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_id: int = Field(description="id ручної транзакції з search_transactions.")
 
 
 class SearchTransactionsArgs(BaseModel):
@@ -373,20 +432,69 @@ async def search_transactions(ctx: ToolContext, args: SearchTransactionsArgs) ->
     return result
 
 
-async def propose_budgets(ctx: ToolContext, args: ProposeBudgetsArgs) -> dict:
+async def _propose(ctx: ToolContext, action_type: str, payload: BaseModel) -> dict:
     if ctx.conversation_id is None:
         raise ToolError("Actions are available only in a conversation")
-    payload = BudgetsPayload(items=[
-        BudgetChange(category_id=item.category_id, amount=None if item.amount is None else round(item.amount * 100))
-        for item in args.items
-    ])
-    action = await ActionService(ctx.db, ctx.user_id).propose(ctx.conversation_id, ctx.tool_use_id, "budgets", payload)
-    return {
-        "action_id": action.id,
-        "status": "pending",
-        "preview": action.preview,
-        "note": "Nothing is changed yet: the user sees a card with confirm and reject buttons.",
-    }
+    service = ActionService(ctx.db, ctx.user_id, ctx.timezone)
+    action = await service.propose(ctx.conversation_id, ctx.tool_use_id, action_type, payload)
+    if ASSISTANT_ACTIONS_NEED_CONFIRMATION:
+        return {
+            "action_id": action.id,
+            "status": "pending",
+            "preview": action.preview,
+            "note": "Nothing is changed yet: the user sees a card with confirm and reject buttons.",
+        }
+    done = await service.confirm(action.id, report=False)
+    return {"action_id": action.id, "status": done.status, "result": done.result, "error": done.error}
+
+
+def _kopecks(amount: float | None) -> int | None:
+    return None if amount is None else round(amount * 100)
+
+
+def _timestamp(ctx: ToolContext, value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo(ctx.timezone))
+    return int(value.timestamp())
+
+
+async def propose_budgets(ctx: ToolContext, args: ProposeBudgetsArgs) -> dict:
+    return await _propose(ctx, "budgets", BudgetsPayload(items=[
+        BudgetChange(category_id=item.category_id, amount=_kopecks(item.amount)) for item in args.items
+    ]))
+
+
+async def propose_transaction(ctx: ToolContext, args: ProposeTransactionArgs) -> dict:
+    return await _propose(ctx, "transaction_create", TransactionCreatePayload(
+        description=args.description,
+        amount=_kopecks(args.amount),
+        category_id=args.category_id,
+        time=_timestamp(ctx, args.time),
+        comment=args.comment,
+    ))
+
+
+async def propose_recategorize(ctx: ToolContext, args: RecategorizeArgs) -> dict:
+    return await _propose(ctx, "transaction_category", RecategorizePayload(items=[
+        CategoryChange(transaction_id=item.transaction_id, category_id=item.category_id) for item in args.items
+    ]))
+
+
+async def propose_transaction_edit(ctx: ToolContext, args: EditTransactionArgs) -> dict:
+    return await _propose(ctx, "transaction_edit", TransactionEditPayload(
+        transaction_id=args.transaction_id,
+        description=args.description,
+        amount=_kopecks(args.amount),
+        category_id=args.category_id,
+        time=_timestamp(ctx, args.time),
+        comment=args.comment,
+    ))
+
+
+async def propose_transaction_delete(ctx: ToolContext, args: TransactionIdArgs) -> dict:
+    return await _propose(ctx, "transaction_delete", TransactionDeletePayload(transaction_id=args.transaction_id))
 
 
 async def remember(ctx: ToolContext, args: RememberArgs) -> dict:
@@ -434,6 +542,8 @@ def _transaction_item(transaction, category, account_currency: int, zone: ZoneIn
     item["category"] = {"id": category.id, "name": category.name} if category else None
     item["account_id"] = transaction.account_id
     item["jar_id"] = transaction.jar_id
+    if transaction.source == "manual":
+        item["manual"] = True
     if transaction.comment:
         item["comment"] = transaction.comment
     return item
@@ -553,14 +663,48 @@ READ_TOOLS = (
 ACTION_TOOLS = (
     Tool(
         name="propose_budgets",
-        label="Готую бюджети",
+        label="Змінюю бюджети",
         description=(
-            "Запропонувати створити, змінити або видалити місячні бюджети по категоріях одним пакетом. "
-            "Нічого не змінює: користувач отримує картку з превʼю і підтверджує або відхиляє її сам. "
+            "Створити, змінити або видалити місячні бюджети по категоріях одним пакетом. "
             "Існуючий бюджет категорії оновлюється, новий створюється."
         ),
         args=ProposeBudgetsArgs,
         handler=propose_budgets,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_transaction",
+        label="Додаю транзакцію",
+        description=(
+            "Додати ручну транзакцію: витрату чи дохід, яких немає на картках (готівка, інший банк). "
+            "Вона потрапляє в аналітику і бюджети."
+        ),
+        args=ProposeTransactionArgs,
+        handler=propose_transaction,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_recategorize",
+        label="Змінюю категорії",
+        description="Змінити категорію однієї чи кількох транзакцій, і з Monobank, і ручних.",
+        args=RecategorizeArgs,
+        handler=propose_recategorize,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_transaction_edit",
+        label="Редагую транзакцію",
+        description="Змінити опис, суму, категорію, час чи коментар ручної транзакції. Транзакції з Monobank так не змінюються.",
+        args=EditTransactionArgs,
+        handler=propose_transaction_edit,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_transaction_delete",
+        label="Видаляю транзакцію",
+        description="Видалити ручну транзакцію. Транзакції з Monobank видалити не можна.",
+        args=TransactionIdArgs,
+        handler=propose_transaction_delete,
         proposes=True,
     ),
 )
