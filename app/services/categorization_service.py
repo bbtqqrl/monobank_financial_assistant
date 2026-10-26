@@ -221,6 +221,14 @@ class CategorizationService:
             if account is not None and account.account_type == "fop":
                 hints.append("This is the user's FOP (sole proprietor) business account.")
 
+        place = transaction.place
+        if place is not None:
+            address = f", {place.address}" if place.address else ""
+            hints.append(
+                f"The phone was at «{place.name}» (place type: {place.category or 'unknown'}{address}) "
+                "when this payment happened - most likely that is where the money was spent."
+            )
+
         if transaction.counter_iban:
             own_ibans = {a.iban for a in await self.accounts.list_for_user(transaction.user_id) if a.iban}
             if transaction.counter_iban in own_ibans:

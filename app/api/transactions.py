@@ -2,13 +2,14 @@ from datetime import date, datetime, time
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
 from app.repositories.transaction import TransactionRepository
+from app.schemas.place import PlaceBrief, SetLocationRequest
 from app.schemas.transaction import (
     CategoryBrief,
     CreateTransactionRequest,
@@ -23,6 +24,8 @@ from app.services.categorization_service import (
     CategoryDirectionError,
     NotManualTransactionError,
 )
+from app.services.transaction_location_service import TransactionLocationService
+from app.services.transaction_pipeline import run_categorization
 from app.services.transaction_service import TransactionService
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -52,6 +55,9 @@ def _to_list_item(transaction, category, account_currency_code: int) -> Transact
         category=_category_brief(category),
         category_source=transaction.category_source,
         category_confidence=transaction.category_confidence,
+        latitude=transaction.latitude,
+        longitude=transaction.longitude,
+        place=PlaceBrief.model_validate(transaction.place) if transaction.place is not None else None,
     )
 
 
@@ -237,6 +243,34 @@ async def update_transaction_category(
 
     if transaction is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+
+    transactions = TransactionRepository(db)
+    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
+    transaction, category, account_currency_code = row
+
+    return TransactionDetail(
+        **_to_list_item(transaction, category, account_currency_code).model_dump(),
+        balance=transaction.balance,
+        comment=transaction.comment,
+        counter_name=transaction.counter_name,
+        counter_edrpou=transaction.counter_edrpou,
+        counter_iban=transaction.counter_iban,
+    )
+
+
+@router.post("/{transaction_id}/location", response_model=TransactionDetail)
+async def set_transaction_location(
+    transaction_id: int,
+    data: SetLocationRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    located = await TransactionLocationService(db, current_user.id).set_location(
+        transaction_id, data.latitude, data.longitude,
+    )
+    if located.category_id is None:
+        background_tasks.add_task(run_categorization, transaction_id)
 
     transactions = TransactionRepository(db)
     row = await transactions.get_detail_for_user(transaction_id, current_user.id)
