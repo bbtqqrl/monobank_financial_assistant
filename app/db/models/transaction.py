@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.db.models.merchant_category_mappings import MerchantCategoryMapping
     from app.db.models.mono_accounts import MonoAccount
     from app.db.models.mono_jars import MonoJar
+    from app.db.models.place import Place
     from app.db.models.user import User
 
 class TransactionRaw(Base):
@@ -59,6 +60,13 @@ class TransactionRaw(Base):
         nullable=True,
         index=True,
     )
+    place_id: Mapped[int | None] = mapped_column(
+        ForeignKey("places.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)
@@ -109,6 +117,8 @@ class TransactionRaw(Base):
     merchant_mapping: Mapped["MerchantCategoryMapping | None"] = relationship(
         back_populates="transactions",
     )
+
+    place: Mapped["Place | None"] = relationship(lazy="selectin")
 
     __table_args__ = (
         # Monobank transactions start uncategorized and get a category in the
