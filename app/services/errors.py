@@ -20,3 +20,7 @@ class ConflictError(ServiceError):
 
 class TooManyRequestsError(ServiceError):
     status_code = 429
+
+
+class ServiceUnavailableError(ServiceError):
+    status_code = 503
