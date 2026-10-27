@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.place import PlaceBrief
+
 # 1 billion in minor units either way - far past any real transaction, well
 # inside BigInteger even after currency conversion.
 MAX_ABS_AMOUNT = 100_000_000_000
@@ -33,6 +35,10 @@ class TransactionListItem(BaseModel):
     category: CategoryBrief | None
     category_source: str | None
     category_confidence: float | None
+    latitude: float | None
+    longitude: float | None
+    place: PlaceBrief | None
+    place_method: str | None
 
 
 class TransactionDetail(TransactionListItem):

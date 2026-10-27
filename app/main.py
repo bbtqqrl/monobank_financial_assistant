@@ -30,7 +30,9 @@ from app.api.assistant import router as assistant_router
 from app.api.auth import router as auth_router
 from app.api.budgets import router as budgets_router
 from app.api.categories import router as categories_router
+from app.api.devices import router as devices_router
 from app.api.merchant_mappings import router as merchant_mappings_router
+from app.api.places import router as places_router
 from app.api.transactions import router as transactions_router
 from app.api.user_connect import router as monobank_router
 from app.api.webhook import router as webhook_router
@@ -76,6 +78,8 @@ app.include_router(budgets_router)
 app.include_router(categories_router)
 app.include_router(analytics_router)
 app.include_router(assistant_router)
+app.include_router(places_router)
+app.include_router(devices_router)
 
 
 if __name__ == '__main__':

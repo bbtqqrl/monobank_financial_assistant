@@ -14,6 +14,7 @@ from app.repositories.transaction import TransactionRepository
 from app.schemas.categorization import CategorizationCandidate
 from app.services.ai.base import CategorizationAIClient
 from app.services.merchant_key import build_merchant_key
+from app.services.place_matching import CONFIDENT_PLACE_METHODS
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,14 @@ class CategorizationService:
             account = await self.accounts.get_by_id_for_user(transaction.account_id, transaction.user_id)
             if account is not None and account.account_type == "fop":
                 hints.append("This is the user's FOP (sole proprietor) business account.")
+
+        place = transaction.place
+        if place is not None and transaction.place_method in CONFIDENT_PLACE_METHODS:
+            address = f", {place.address}" if place.address else ""
+            hints.append(
+                f"The phone was at «{place.name}» (place type: {place.category or 'unknown'}{address}) "
+                "when this payment happened - most likely that is where the money was spent."
+            )
 
         if transaction.counter_iban:
             own_ibans = {a.iban for a in await self.accounts.list_for_user(transaction.user_id) if a.iban}
