@@ -9,7 +9,7 @@ from app.repositories.transaction import TransactionRepository
 from app.services.errors import NotFoundError, ServiceUnavailableError
 from app.services.merchant_key import build_merchant_key
 from app.services.place_matching import CONFIDENT_PLACE_METHODS, PlaceMethod, choose_place
-from app.services.places import PlaceService, distance_m, write_compare_log
+from app.services.places import PlaceService, distance_m
 
 LINK_RADIUS_M = 150
 
@@ -51,24 +51,12 @@ class TransactionLocationService:
             return linked, PlaceMethod.LINK
 
         try:
-            search = await self.places.search(latitude, longitude, place_filter)
+            candidates = await self.places.search(latitude, longitude, place_filter)
         except ServiceUnavailableError:
-            search = None
-        if search is None or search.unavailable:
             # TODO: повторити пошук місця пізніше для транзакцій з координатами, але без place_method
             return None, None
 
-        found, method = choose_place(search.candidates, transaction.description or "")
-        if self.places.compare:
-            write_compare_log({
-                "transaction_id": transaction.id, "description": transaction.description, "mcc": transaction.mcc,
-                "latitude": latitude, "longitude": longitude, "method": method,
-                "chosen": found.model_dump() if found else None,
-                "providers": {
-                    name: [p.model_dump() for p in results] if results is not None else "unavailable"
-                    for name, results in search.results.items()
-                },
-            })
+        found, method = choose_place(candidates, transaction.description or "")
         if found is None:
             return None, method
 

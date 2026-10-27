@@ -10,8 +10,7 @@ class MccPlaceType(Base):
 
     mcc: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     google_types: Mapped[list[str]] = mapped_column(ARRAY(String(50)), nullable=False, default=list)
-    apple_categories: Mapped[list[str]] = mapped_column(ARRAY(String(50)), nullable=False, default=list)
 
     @property
     def searchable(self) -> bool:
-        return bool(self.google_types or self.apple_categories)
+        return bool(self.google_types)

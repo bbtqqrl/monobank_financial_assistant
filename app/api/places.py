@@ -25,7 +25,7 @@ async def place_candidates(
 ):
     place_filter = await MccPlaceTypeRepository(db).get(mcc)
     if place_filter is None or not place_filter.searchable:
-        return PlaceCandidatesResponse(searchable=False, providers={})
-    search = await PlaceService(compare=True).search(latitude, longitude, place_filter, radius_m, lang)
-    chosen, method = choose_place(search.candidates, merchant)
-    return PlaceCandidatesResponse(searchable=True, providers=search.results, chosen=chosen, method=method)
+        return PlaceCandidatesResponse(searchable=False, candidates=[])
+    candidates = await PlaceService().search(latitude, longitude, place_filter, radius_m, lang)
+    chosen, method = choose_place(candidates, merchant)
+    return PlaceCandidatesResponse(searchable=True, candidates=candidates, chosen=chosen, method=method)

@@ -14,7 +14,7 @@ class PlaceResponse(BaseModel):
 
 class PlaceCandidatesResponse(BaseModel):
     searchable: bool
-    providers: dict[str, list[PlaceResponse] | None]
+    candidates: list[PlaceResponse]
     chosen: PlaceResponse | None = None
     method: str | None = None
 

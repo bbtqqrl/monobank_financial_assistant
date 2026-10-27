@@ -17,21 +17,21 @@ down_revision: Union[str, Sequence[str], None] = 'c3f8a1d5e2b7'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-GROCERY = (["supermarket", "grocery_store", "convenience_store", "food_store"], ["FoodMarket", "Store"])
-FOOD = (["restaurant", "cafe", "coffee_shop", "bar", "fast_food_restaurant"], ["Restaurant", "Cafe", "Bakery", "Nightlife"])
-BAKERY = (["bakery", "cafe"], ["Bakery", "Cafe"])
-PHARMACY = (["pharmacy", "drugstore"], ["Pharmacy"])
-LIQUOR = (["liquor_store"], ["Store", "FoodMarket"])
-STORE = (["store", "department_store", "drugstore"], ["Store"])
-CLOTHES = (["clothing_store", "shoe_store"], ["Store"])
-ELECTRONICS = (["electronics_store"], ["Store"])
-GAS = (["gas_station"], ["GasStation"])
-MEDICAL = (["dentist", "doctor", "hospital"], ["Hospital"])
-CINEMA = (["movie_theater"], ["MovieTheater"])
-ARCADE = (["video_arcade", "amusement_center"], [])
-BEAUTY = (["hair_care", "beauty_salon"], [])
-GYM = (["gym"], ["FitnessCenter"])
-SKIP = ([], [])
+GROCERY = ["supermarket", "grocery_store", "convenience_store", "food_store"]
+FOOD = ["restaurant", "cafe", "coffee_shop", "bar", "fast_food_restaurant"]
+BAKERY = ["bakery", "cafe"]
+PHARMACY = ["pharmacy", "drugstore"]
+LIQUOR = ["liquor_store"]
+STORE = ["store", "department_store", "drugstore"]
+CLOTHES = ["clothing_store", "shoe_store"]
+ELECTRONICS = ["electronics_store"]
+GAS = ["gas_station"]
+MEDICAL = ["dentist", "doctor", "hospital"]
+CINEMA = ["movie_theater"]
+ARCADE = ["video_arcade", "amusement_center"]
+BEAUTY = ["hair_care", "beauty_salon"]
+GYM = ["gym"]
+SKIP = []
 
 MCC_PLACE_TYPES = {
     5411: GROCERY, 5499: GROCERY,
@@ -60,11 +60,10 @@ def upgrade() -> None:
         'mcc_place_types',
         sa.Column('mcc', sa.Integer(), primary_key=True, autoincrement=False),
         sa.Column('google_types', postgresql.ARRAY(sa.String(50)), nullable=False, server_default='{}'),
-        sa.Column('apple_categories', postgresql.ARRAY(sa.String(50)), nullable=False, server_default='{}'),
     )
     op.bulk_insert(table, [
-        {'mcc': mcc, 'google_types': google, 'apple_categories': apple}
-        for mcc, (google, apple) in MCC_PLACE_TYPES.items()
+        {'mcc': mcc, 'google_types': google}
+        for mcc, google in MCC_PLACE_TYPES.items()
     ])
     op.create_table(
         'merchant_places',
