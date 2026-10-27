@@ -36,6 +36,8 @@ APPLE_MAPS_PRIVATE_KEY = os.getenv("APPLE_MAPS_PRIVATE_KEY", "").replace("\\n", 
 # TODO: прибрати, коли на сервері буде .p8 ключ Apple Maps
 APPLE_MAPS_TOKEN = os.getenv("APPLE_MAPS_TOKEN")
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
+PLACE_SEARCH_RADIUS_M = int(os.getenv("PLACE_SEARCH_RADIUS_M", "30"))
+PLACES_COMPARE_LOG = os.getenv("PLACES_COMPARE_LOG")
 
 EXPO_ACCESS_TOKEN = os.getenv("EXPO_ACCESS_TOKEN")
 

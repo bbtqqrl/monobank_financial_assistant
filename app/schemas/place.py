@@ -12,6 +12,13 @@ class PlaceResponse(BaseModel):
     distance_m: int
 
 
+class PlaceCandidatesResponse(BaseModel):
+    searchable: bool
+    providers: dict[str, list[PlaceResponse] | None]
+    chosen: PlaceResponse | None = None
+    method: str | None = None
+
+
 class PlaceBrief(BaseModel):
     id: int
     provider: str

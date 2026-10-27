@@ -5,9 +5,11 @@ import time
 from app.core.tasks import spawn
 from app.db.models.transaction import TransactionRaw
 from app.db.session import SessionLocal
+from app.repositories.mcc_place_type import MccPlaceTypeRepository
 from app.repositories.transaction import TransactionRepository
 from app.services.ai.factory import get_categorization_ai_client
 from app.services.categorization_service import CategorizationAIError, CategorizationService
+from app.services.place_matching import PlaceMethod
 from app.services.push import PushService
 
 logger = logging.getLogger(__name__)
@@ -34,13 +36,18 @@ async def process_new_transaction(transaction_id: int) -> None:
     async with SessionLocal() as db:
         transaction = await TransactionRepository(db).get_by_id(transaction_id)
         if transaction is not None and needs_location(transaction):
-            requested = await PushService(db).send_silent(
-                transaction.user_id, {"type": LOCATION_REQUEST, "transaction_id": transaction_id},
-            )
-            if requested:
-                logger.info("Location requested for transaction id=%s", transaction_id)
-                spawn(_categorize_later(transaction_id, LOCATION_WAIT_SECONDS))
-                return
+            place_filter = await MccPlaceTypeRepository(db).get(transaction.mcc)
+            if place_filter is None or not place_filter.searchable:
+                transaction.place_method = PlaceMethod.SKIPPED
+                await db.commit()
+            else:
+                requested = await PushService(db).send_silent(
+                    transaction.user_id, {"type": LOCATION_REQUEST, "transaction_id": transaction_id},
+                )
+                if requested:
+                    logger.info("Location requested for transaction id=%s", transaction_id)
+                    spawn(_categorize_later(transaction_id, LOCATION_WAIT_SECONDS))
+                    return
     await run_categorization(transaction_id)
 
 

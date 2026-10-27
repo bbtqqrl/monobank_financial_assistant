@@ -14,6 +14,7 @@ from app.repositories.transaction import TransactionRepository
 from app.schemas.categorization import CategorizationCandidate
 from app.services.ai.base import CategorizationAIClient
 from app.services.merchant_key import build_merchant_key
+from app.services.place_matching import CONFIDENT_PLACE_METHODS
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ class CategorizationService:
                 hints.append("This is the user's FOP (sole proprietor) business account.")
 
         place = transaction.place
-        if place is not None:
+        if place is not None and transaction.place_method in CONFIDENT_PLACE_METHODS:
             address = f", {place.address}" if place.address else ""
             hints.append(
                 f"The phone was at «{place.name}» (place type: {place.category or 'unknown'}{address}) "

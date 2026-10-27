@@ -58,6 +58,7 @@ def _to_list_item(transaction, category, account_currency_code: int) -> Transact
         latitude=transaction.latitude,
         longitude=transaction.longitude,
         place=PlaceBrief.model_validate(transaction.place) if transaction.place is not None else None,
+        place_method=transaction.place_method,
     )
 
 

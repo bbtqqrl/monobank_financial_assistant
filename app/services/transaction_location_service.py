@@ -2,12 +2,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.place import Place
 from app.db.models.transaction import TransactionRaw
+from app.repositories.mcc_place_type import MccPlaceTypeRepository
+from app.repositories.merchant_place import MerchantPlaceRepository
 from app.repositories.place import PlaceRepository
 from app.repositories.transaction import TransactionRepository
 from app.services.errors import NotFoundError, ServiceUnavailableError
-from app.services.places import PlaceService, distance_m
+from app.services.merchant_key import build_merchant_key
+from app.services.place_matching import CONFIDENT_PLACE_METHODS, PlaceMethod, choose_place
+from app.services.places import PlaceService, distance_m, write_compare_log
 
-KNOWN_PLACE_RADIUS_M = 50
+LINK_RADIUS_M = 150
 
 
 class TransactionLocationService:
@@ -17,6 +21,8 @@ class TransactionLocationService:
         self.user_id = user_id
         self.places = places or PlaceService()
         self.place_repo = PlaceRepository(db)
+        self.links = MerchantPlaceRepository(db)
+        self.mcc_types = MccPlaceTypeRepository(db)
         self.transactions = TransactionRepository(db)
 
     async def set_location(self, transaction_id: int, latitude: float, longitude: float) -> TransactionRaw:
@@ -24,25 +30,57 @@ class TransactionLocationService:
         if transaction is None:
             raise NotFoundError("Transaction not found")
 
-        place = await self._known_place(transaction, latitude, longitude) or await self._find_place(latitude, longitude)
+        place, method = await self._locate(transaction, latitude, longitude)
         transaction.latitude = latitude
         transaction.longitude = longitude
         transaction.place = place
+        transaction.place_method = method
         await self.db.commit()
         return transaction
 
-    async def _known_place(self, transaction: TransactionRaw, latitude: float, longitude: float) -> Place | None:
-        if transaction.merchant_mapping_id is None:
-            return None
-        places = await self.place_repo.list_for_merchant(self.user_id, transaction.merchant_mapping_id)
-        distance = {place.id: distance_m(latitude, longitude, place.latitude, place.longitude) for place in places}
-        nearby = [place for place in places if distance[place.id] <= KNOWN_PLACE_RADIUS_M]
-        return min(nearby, key=lambda place: distance[place.id], default=None)
+    async def _locate(
+        self, transaction: TransactionRaw, latitude: float, longitude: float,
+    ) -> tuple[Place | None, PlaceMethod | None]:
+        place_filter = await self.mcc_types.get(transaction.mcc) if transaction.mcc is not None else None
+        if place_filter is None or not place_filter.searchable:
+            return None, PlaceMethod.SKIPPED
 
-    async def _find_place(self, latitude: float, longitude: float) -> Place | None:
+        merchant_key = build_merchant_key(transaction.description or "")
+        linked = await self._linked_place(merchant_key, latitude, longitude)
+        if linked is not None:
+            return linked, PlaceMethod.LINK
+
         try:
-            found = await self.places.nearest(latitude, longitude)
+            search = await self.places.search(latitude, longitude, place_filter)
         except ServiceUnavailableError:
-            # TODO: повторити пошук місця пізніше для транзакцій з координатами, але без place_id
+            search = None
+        if search is None or search.unavailable:
+            # TODO: повторити пошук місця пізніше для транзакцій з координатами, але без place_method
+            return None, None
+
+        found, method = choose_place(search.candidates, transaction.description or "")
+        if self.places.compare:
+            write_compare_log({
+                "transaction_id": transaction.id, "description": transaction.description, "mcc": transaction.mcc,
+                "latitude": latitude, "longitude": longitude, "method": method,
+                "chosen": found.model_dump() if found else None,
+                "providers": {
+                    name: [p.model_dump() for p in results] if results is not None else "unavailable"
+                    for name, results in search.results.items()
+                },
+            })
+        if found is None:
+            return None, method
+
+        place = await self.place_repo.upsert(found)
+        if merchant_key and method in CONFIDENT_PLACE_METHODS:
+            await self.links.link(merchant_key, place.id)
+        return place, method
+
+    async def _linked_place(self, merchant_key: str, latitude: float, longitude: float) -> Place | None:
+        if not merchant_key:
             return None
-        return await self.place_repo.upsert(found) if found else None
+        places = await self.links.list_near(merchant_key, latitude, longitude, LINK_RADIUS_M)
+        distance = {place.id: distance_m(latitude, longitude, place.latitude, place.longitude) for place in places}
+        nearby = [place for place in places if distance[place.id] <= LINK_RADIUS_M]
+        return min(nearby, key=lambda place: distance[place.id], default=None)

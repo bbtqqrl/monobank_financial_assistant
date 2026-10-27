@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app.services import transaction_pipeline as pipeline
 from app.services.categorization_service import CategorizationService
+from app.services.place_matching import PlaceMethod
 
 NOW = 1_800_000_000
 
@@ -23,12 +24,22 @@ def test_needs_location_only_for_fresh_card_purchases():
     assert not pipeline.needs_location(purchase(time=NOW - 3600), NOW)
 
 
-def patch_pipeline(monkeypatch, transaction, push_ok):
-    calls = {"push": [], "now": [], "later": []}
+def patch_pipeline(monkeypatch, transaction, push_ok, searchable=True):
+    calls = {"push": [], "now": [], "later": [], "commits": 0}
+
+    async def commit():
+        calls["commits"] += 1
 
     @asynccontextmanager
     async def session():
-        yield SimpleNamespace()
+        yield SimpleNamespace(commit=commit)
+
+    class MccRepo:
+        def __init__(self, db):
+            pass
+
+        async def get(self, mcc):
+            return SimpleNamespace(searchable=searchable)
 
     class Repo:
         def __init__(self, db):
@@ -53,6 +64,7 @@ def patch_pipeline(monkeypatch, transaction, push_ok):
 
     monkeypatch.setattr(pipeline, "SessionLocal", session)
     monkeypatch.setattr(pipeline, "TransactionRepository", Repo)
+    monkeypatch.setattr(pipeline, "MccPlaceTypeRepository", MccRepo)
     monkeypatch.setattr(pipeline, "PushService", Push)
     monkeypatch.setattr(pipeline, "run_categorization", run_now)
     monkeypatch.setattr(pipeline, "_categorize_later", later)
@@ -81,12 +93,28 @@ async def test_transfer_skips_location(monkeypatch):
     assert (calls["push"], calls["now"]) == ([], [1])
 
 
-async def test_place_becomes_categorization_hint():
-    service = CategorizationService.__new__(CategorizationService)
+async def test_mcc_without_search_skips_push(monkeypatch):
+    transaction = purchase(mcc=4829, place_method=None)
+    calls = patch_pipeline(monkeypatch, transaction, push_ok=True, searchable=False)
+    await pipeline.process_new_transaction(1)
+    assert (calls["push"], calls["now"], calls["commits"]) == ([], [1], 1)
+    assert transaction.place_method == PlaceMethod.SKIPPED
+
+
+def place_transaction(method):
     place = SimpleNamespace(name="Каву єнайдено", category="coffee_shop", address="вулиця Шевченка, 44, Львів")
-    transaction = SimpleNamespace(jar_id=None, account_id=None, counter_iban=None, place=place)
-    hints = await service._build_hints(transaction)
+    return SimpleNamespace(jar_id=None, account_id=None, counter_iban=None, place=place, place_method=method)
+
+
+async def test_confident_place_becomes_categorization_hint():
+    service = CategorizationService.__new__(CategorizationService)
+    hints = await service._build_hints(place_transaction(PlaceMethod.NAME_MATCH))
     assert hints == [
         "The phone was at «Каву єнайдено» (place type: coffee_shop, вулиця Шевченка, 44, Львів) "
         "when this payment happened - most likely that is where the money was spent."
     ]
+
+
+async def test_nearest_place_is_not_a_hint():
+    service = CategorizationService.__new__(CategorizationService)
+    assert await service._build_hints(place_transaction(PlaceMethod.NEAREST)) == []

@@ -1,12 +1,18 @@
+import asyncio
+import json
 import logging
 import math
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Protocol
 
 import httpx
 import jwt
 
 from app.core.config import (
     APPLE_MAPS_KEY_ID, APPLE_MAPS_PRIVATE_KEY, APPLE_MAPS_TEAM_ID, APPLE_MAPS_TOKEN, GOOGLE_PLACES_API_KEY,
+    PLACE_SEARCH_RADIUS_M, PLACES_COMPARE_LOG,
 )
 from app.schemas.place import PlaceResponse
 from app.services.errors import ServiceUnavailableError
@@ -18,22 +24,29 @@ GOOGLE_PLACES_URL = "https://places.googleapis.com/v1"
 GOOGLE_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType"
 SIGNED_TOKEN_TTL_SECONDS = 3600
 ACCESS_TOKEN_MARGIN_SECONDS = 60
-NEAREST_RADIUS_M = 150
-GOOGLE_MAX_RESULTS = 10
+GOOGLE_MAX_RESULTS = 20
 EARTH_RADIUS_M = 6_371_000
 METERS_PER_DEGREE = 111_320
-APPLE_NOT_PLACES = {
-    None, "Landmark", "Park", "NationalPark", "Beach", "Marina", "Campground", "Castle", "Fortress",
-    "PublicTransport", "Parking", "Restroom", "ATM", "FireStation", "Police", "School", "University", "Library",
-}
-GOOGLE_PLACE_TYPES = [
-    "restaurant", "cafe", "coffee_shop", "bar", "bakery", "fast_food_restaurant", "meal_takeaway", "supermarket",
-    "grocery_store", "convenience_store", "food_store", "liquor_store", "store", "shopping_mall", "pharmacy",
-    "drugstore", "gas_station", "gym", "beauty_salon", "hair_care", "movie_theater", "night_club", "car_wash",
-    "car_repair", "dentist", "doctor", "hospital", "hotel",
-]
 
 _apple_access_token = {"value": None, "expires_at": 0.0}
+
+
+class PlaceFilter(Protocol):
+    google_types: list[str]
+    apple_categories: list[str]
+
+
+@dataclass
+class PlaceSearch:
+    results: dict[str, list[PlaceResponse] | None]
+
+    @property
+    def candidates(self) -> list[PlaceResponse]:
+        return next((found for found in self.results.values() if found), [])
+
+    @property
+    def unavailable(self) -> bool:
+        return all(found is None for found in self.results.values())
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -49,8 +62,8 @@ def search_region(latitude: float, longitude: float, radius_m: float) -> str:
     return f"{latitude + dlat},{longitude + dlon},{latitude - dlat},{longitude - dlon}"
 
 
-def _closest(places: list[PlaceResponse]) -> PlaceResponse | None:
-    return min((p for p in places if p.distance_m <= NEAREST_RADIUS_M), key=lambda p: p.distance_m, default=None)
+def _within(places: list[PlaceResponse], radius_m: float) -> list[PlaceResponse]:
+    return sorted((p for p in places if p.distance_m <= radius_m), key=lambda p: p.distance_m)
 
 
 def _place(
@@ -91,18 +104,22 @@ class GooglePlacesProvider:
     def configured() -> bool:
         return bool(GOOGLE_PLACES_API_KEY)
 
-    async def nearest(self, latitude: float, longitude: float, lang: str) -> PlaceResponse | None:
+    async def search(
+        self, latitude: float, longitude: float, place_filter: PlaceFilter, radius_m: float, lang: str,
+    ) -> list[PlaceResponse]:
+        if not place_filter.google_types:
+            return []
         try:
             async with httpx.AsyncClient(base_url=GOOGLE_PLACES_URL, timeout=10, transport=self._transport) as client:
                 response = await client.post("/places:searchNearby", headers={
                     "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY, "X-Goog-FieldMask": GOOGLE_FIELD_MASK,
                 }, json={
-                    "includedTypes": GOOGLE_PLACE_TYPES,
+                    "includedTypes": place_filter.google_types,
                     "maxResultCount": GOOGLE_MAX_RESULTS,
                     "rankPreference": "DISTANCE",
                     "languageCode": lang,
                     "locationRestriction": {"circle": {
-                        "center": {"latitude": latitude, "longitude": longitude}, "radius": NEAREST_RADIUS_M,
+                        "center": {"latitude": latitude, "longitude": longitude}, "radius": radius_m,
                     }},
                 })
                 response.raise_for_status()
@@ -110,7 +127,7 @@ class GooglePlacesProvider:
         except httpx.HTTPError:
             logger.warning("Google Places search failed", exc_info=True)
             raise ServiceUnavailableError("Google Places is unavailable")
-        return _closest([
+        return _within([
             _place(
                 self.name, result["id"], (result.get("displayName") or {}).get("text", ""),
                 result.get("primaryType"), result.get("formattedAddress"),
@@ -118,7 +135,7 @@ class GooglePlacesProvider:
             )
             for result in results
             if result.get("id") and result.get("location")
-        ])
+        ], radius_m)
 
 
 class AppleMapsProvider:
@@ -131,27 +148,34 @@ class AppleMapsProvider:
     def configured() -> bool:
         return bool(APPLE_MAPS_TOKEN or (APPLE_MAPS_PRIVATE_KEY and APPLE_MAPS_KEY_ID and APPLE_MAPS_TEAM_ID))
 
-    async def nearest(self, latitude: float, longitude: float, lang: str) -> PlaceResponse | None:
+    async def search(
+        self, latitude: float, longitude: float, place_filter: PlaceFilter, radius_m: float, lang: str,
+    ) -> list[PlaceResponse]:
+        if not place_filter.apple_categories:
+            return []
         try:
             async with httpx.AsyncClient(base_url=APPLE_MAPS_URL, timeout=10, transport=self._transport) as client:
                 token = await self._access_token(client)
                 response = await client.get("/search", headers={"Authorization": f"Bearer {token}"}, params={
-                    "q": "*", "searchRegion": search_region(latitude, longitude, NEAREST_RADIUS_M), "lang": lang,
+                    "q": "*",
+                    "searchRegion": search_region(latitude, longitude, radius_m),
+                    "includePoiCategories": ",".join(place_filter.apple_categories),
+                    "lang": lang,
                 })
                 response.raise_for_status()
                 results = response.json().get("results", [])
         except httpx.HTTPError:
             logger.warning("Apple Maps search failed", exc_info=True)
             raise ServiceUnavailableError("Apple Maps is unavailable")
-        return _closest([
+        return _within([
             _place(
                 self.name, result["id"], result.get("name", ""), result.get("poiCategory"),
                 ", ".join((result.get("formattedAddressLines") or [])[:2]) or None,
                 result["coordinate"]["latitude"], result["coordinate"]["longitude"], latitude, longitude,
             )
             for result in results
-            if result.get("id") and result.get("coordinate") and result.get("poiCategory") not in APPLE_NOT_PLACES
-        ])
+            if result.get("id") and result.get("coordinate")
+        ], radius_m)
 
     async def _access_token(self, client: httpx.AsyncClient) -> str:
         if _apple_access_token["value"] and _apple_access_token["expires_at"] > time.time():
@@ -167,23 +191,44 @@ class AppleMapsProvider:
 
 
 class PlaceService:
-    def __init__(self, providers: list | None = None):
+    def __init__(self, providers: list | None = None, compare: bool | None = None):
         self._providers = providers if providers is not None else [
             p for p in (GooglePlacesProvider(), AppleMapsProvider()) if p.configured()
         ]
+        self.compare = bool(PLACES_COMPARE_LOG) if compare is None else compare
 
-    async def nearest(self, latitude: float, longitude: float, lang: str = "uk") -> PlaceResponse | None:
+    async def search(
+        self, latitude: float, longitude: float, place_filter: PlaceFilter,
+        radius_m: float = PLACE_SEARCH_RADIUS_M, lang: str = "uk",
+    ) -> PlaceSearch:
         if not self._providers:
             raise ServiceUnavailableError("Place search is not configured")
-        failed = 0
+        if self.compare:
+            found = await asyncio.gather(*(
+                self._search(p, latitude, longitude, place_filter, radius_m, lang) for p in self._providers
+            ))
+            return PlaceSearch(dict(zip((p.name for p in self._providers), found)))
+        results = {}
         for provider in self._providers:
-            try:
-                place = await provider.nearest(latitude, longitude, lang)
-            except ServiceUnavailableError:
-                failed += 1
-                continue
-            if place:
-                return place
-        if failed == len(self._providers):
-            raise ServiceUnavailableError("Place search is unavailable")
-        return None
+            results[provider.name] = await self._search(provider, latitude, longitude, place_filter, radius_m, lang)
+            if results[provider.name]:
+                break
+        return PlaceSearch(results)
+
+    @staticmethod
+    async def _search(provider, latitude, longitude, place_filter, radius_m, lang) -> list[PlaceResponse] | None:
+        try:
+            return await provider.search(latitude, longitude, place_filter, radius_m, lang)
+        except ServiceUnavailableError:
+            return None
+
+
+def write_compare_log(record: dict) -> None:
+    if not PLACES_COMPARE_LOG:
+        return
+    line = json.dumps({"at": datetime.now(timezone.utc).isoformat(), **record}, ensure_ascii=False, default=str)
+    try:
+        with open(PLACES_COMPARE_LOG, "a", encoding="utf-8") as log:
+            log.write(line + "\n")
+    except OSError:
+        logger.warning("Could not write places compare log to %s", PLACES_COMPARE_LOG, exc_info=True)

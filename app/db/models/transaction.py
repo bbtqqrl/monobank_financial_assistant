@@ -67,6 +67,7 @@ class TransactionRaw(Base):
     )
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    place_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)

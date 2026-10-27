@@ -12,10 +12,12 @@ from app.repositories.place import PlaceRepository
 from app.schemas.place import PlaceResponse
 from app.services import places
 from app.services.errors import NotFoundError, ServiceUnavailableError
+from app.services.place_matching import PlaceMethod
 from app.services.places import AppleMapsProvider, GooglePlacesProvider, PlaceService, distance_m
 from app.services.transaction_location_service import TransactionLocationService
 
 LAT, LON = 49.8395, 24.0297
+FOOD = SimpleNamespace(google_types=["restaurant", "cafe"], apple_categories=["Restaurant", "Cafe"], searchable=True)
 
 
 def apple(name, lat, lon, category="Restaurant"):
@@ -28,8 +30,8 @@ def google(name, lat, lon, category="restaurant"):
             "location": {"latitude": lat, "longitude": lon}, "formattedAddress": "вулиця Шевченка, 44, Львів"}
 
 
-def found(name="Кава", distance=5):
-    return PlaceResponse(provider="google", place_id=f"G{name}", name=name, category="cafe", address=None,
+def found(name="Кава", distance=5, provider="google"):
+    return PlaceResponse(provider=provider, place_id=f"G{name}", name=name, category="cafe", address=None,
                          latitude=LAT, longitude=LON, distance_m=distance)
 
 
@@ -37,7 +39,7 @@ def test_distance():
     assert round(distance_m(LAT, LON, LAT + 0.001, LON)) == 111
 
 
-async def test_google_nearest_by_distance(monkeypatch):
+async def test_google_returns_candidates_within_radius(monkeypatch):
     monkeypatch.setattr(places, "GOOGLE_PLACES_API_KEY", "gkey")
     bodies = []
 
@@ -45,31 +47,36 @@ async def test_google_nearest_by_distance(monkeypatch):
         assert request.headers["X-Goog-Api-Key"] == "gkey"
         bodies.append(json.loads(request.content))
         return httpx.Response(200, json={"places": [
-            google("Далеко", LAT + 0.01, LON), google("Кава 44", LAT + 0.0003, LON, "coffee_shop"),
-            google("Шаурма", LAT + 0.0006, LON),
+            google("Шаурма", LAT + 0.0002, LON), google("Кава 44", LAT + 0.0001, LON, "cafe"),
+            google("Далеко", LAT + 0.01, LON),
         ]})
 
-    place = await GooglePlacesProvider(httpx.MockTransport(handler)).nearest(LAT, LON, "uk")
-    assert (place.provider, place.place_id, place.name, place.category, place.distance_m) == (
-        "google", "GКава 44", "Кава 44", "coffee_shop", 33,
-    )
+    found_places = await GooglePlacesProvider(httpx.MockTransport(handler)).search(LAT, LON, FOOD, 30, "uk")
+    assert [(p.name, p.distance_m) for p in found_places] == [("Кава 44", 11), ("Шаурма", 22)]
+    assert bodies[0]["includedTypes"] == ["restaurant", "cafe"]
     assert bodies[0]["rankPreference"] == "DISTANCE"
-    assert bodies[0]["includedTypes"] == places.GOOGLE_PLACE_TYPES
-    assert bodies[0]["locationRestriction"]["circle"]["radius"] == places.NEAREST_RADIUS_M
+    assert bodies[0]["locationRestriction"]["circle"]["radius"] == 30
 
 
-async def test_apple_skips_landmarks(monkeypatch):
+async def test_providers_skip_request_without_types():
+    def handler(request):
+        raise AssertionError("no request expected")
+
+    no_types = SimpleNamespace(google_types=[], apple_categories=[])
+    assert await GooglePlacesProvider(httpx.MockTransport(handler)).search(LAT, LON, no_types, 30, "uk") == []
+    assert await AppleMapsProvider(httpx.MockTransport(handler)).search(LAT, LON, no_types, 30, "uk") == []
+
+
+async def test_apple_filters_by_categories(monkeypatch):
     monkeypatch.setattr(places, "_apple_access_token", {"value": "access", "expires_at": 1e12})
 
     def handler(request):
         assert request.url.params["q"] == "*"
-        return httpx.Response(200, json={"results": [
-            apple("Площа", LAT, LON, None), apple("Пам'ятник", LAT + 0.0002, LON, "Landmark"),
-            apple("Шаурма", LAT + 0.0005, LON),
-        ]})
+        assert request.url.params["includePoiCategories"] == "Restaurant,Cafe"
+        return httpx.Response(200, json={"results": [apple("Шаурма", LAT + 0.0001, LON), apple("Далеко", LAT + 0.01, LON)]})
 
-    place = await AppleMapsProvider(httpx.MockTransport(handler)).nearest(LAT, LON, "uk")
-    assert (place.name, place.address) == ("Шаурма", "Галицька вулиця, 9, Львів")
+    found_places = await AppleMapsProvider(httpx.MockTransport(handler)).search(LAT, LON, FOOD, 30, "uk")
+    assert [(p.name, p.address) for p in found_places] == [("Шаурма", "Галицька вулиця, 9, Львів")]
 
 
 async def test_apple_signs_token_and_caches_it(monkeypatch):
@@ -92,22 +99,22 @@ async def test_apple_signs_token_and_caches_it(monkeypatch):
         return httpx.Response(200, json={"results": [apple("Сільпо", LAT, LON)]})
 
     provider = AppleMapsProvider(httpx.MockTransport(handler))
-    await provider.nearest(LAT, LON, "uk")
-    await provider.nearest(LAT, LON, "uk")
+    await provider.search(LAT, LON, FOOD, 30, "uk")
+    await provider.search(LAT, LON, FOOD, 30, "uk")
     assert calls == ["/v1/token", "/v1/search", "/v1/search"]
 
 
 async def test_provider_errors_become_unavailable(monkeypatch):
     monkeypatch.setattr(places, "_apple_access_token", {"value": "access", "expires_at": 1e12})
     with pytest.raises(ServiceUnavailableError):
-        await AppleMapsProvider(httpx.MockTransport(lambda request: httpx.Response(500))).nearest(LAT, LON, "uk")
+        await AppleMapsProvider(httpx.MockTransport(lambda request: httpx.Response(500))).search(LAT, LON, FOOD, 30, "uk")
 
 
 class Provider:
-    def __init__(self, result=None, fails=False):
-        self.result, self.fails, self.calls = result, fails, 0
+    def __init__(self, name, result=(), fails=False):
+        self.name, self.result, self.fails, self.calls = name, list(result), fails, 0
 
-    async def nearest(self, latitude, longitude, lang):
+    async def search(self, latitude, longitude, place_filter, radius_m, lang):
         self.calls += 1
         if self.fails:
             raise ServiceUnavailableError("down")
@@ -115,21 +122,30 @@ class Provider:
 
 
 async def test_service_falls_back_to_second_provider():
-    google_down, apple_ok = Provider(fails=True), Provider(found("Шаурма"))
-    assert (await PlaceService([google_down, apple_ok]).nearest(LAT, LON)).name == "Шаурма"
-    empty, second = Provider(None), Provider(found("Кава"))
-    assert (await PlaceService([empty, second]).nearest(LAT, LON)).name == "Кава"
-    first, unused = Provider(found("Перше")), Provider(found("Друге"))
-    assert (await PlaceService([first, unused]).nearest(LAT, LON)).name == "Перше"
-    assert unused.calls == 0
+    search = await PlaceService([Provider("google", fails=True), Provider("apple", [found("Шаурма")])], compare=False).search(LAT, LON, FOOD)
+    assert [p.name for p in search.candidates] == ["Шаурма"]
+    search = await PlaceService([Provider("google"), Provider("apple", [found("Кава")])], compare=False).search(LAT, LON, FOOD)
+    assert [p.name for p in search.candidates] == ["Кава"]
+    unused = Provider("apple", [found("Друге")])
+    search = await PlaceService([Provider("google", [found("Перше")]), unused], compare=False).search(LAT, LON, FOOD)
+    assert ([p.name for p in search.candidates], unused.calls, list(search.results)) == (["Перше"], 0, ["google"])
+
+
+async def test_compare_mode_asks_every_provider():
+    google_provider, apple_provider = Provider("google", [found("Перше")]), Provider("apple", fails=True)
+    search = await PlaceService([google_provider, apple_provider], compare=True).search(LAT, LON, FOOD)
+    assert (google_provider.calls, apple_provider.calls) == (1, 1)
+    assert search.results["apple"] is None
+    assert [p.name for p in search.candidates] == ["Перше"]
 
 
 async def test_service_nothing_found_or_all_down():
-    assert await PlaceService([Provider(None), Provider(None)]).nearest(LAT, LON) is None
+    search = await PlaceService([Provider("google"), Provider("apple")], compare=False).search(LAT, LON, FOOD)
+    assert (search.candidates, search.unavailable) == ([], False)
+    search = await PlaceService([Provider("google", fails=True)], compare=False).search(LAT, LON, FOOD)
+    assert search.unavailable
     with pytest.raises(ServiceUnavailableError):
-        await PlaceService([Provider(fails=True)]).nearest(LAT, LON)
-    with pytest.raises(ServiceUnavailableError):
-        await PlaceService([]).nearest(LAT, LON)
+        await PlaceService([]).search(LAT, LON, FOOD)
 
 
 async def test_upsert_statement_compiles():
@@ -152,54 +168,104 @@ class FakeDb:
         self.commits += 1
 
 
-def location_service(transaction, known=(), result=None, fails=False):
-    service = TransactionLocationService(FakeDb(), 5, PlaceService([Provider(result, fails)]))
-    upserted = []
+def location_service(transaction, candidates=(), fails=False, linked=(), mcc_type=FOOD, compare=False):
+    provider = Provider("google", candidates, fails)
+    service = TransactionLocationService(FakeDb(), 5, PlaceService([provider], compare=compare))
+    calls = {"upserted": [], "links": [], "provider": provider}
 
     async def get_by_id_for_user(transaction_id, user_id):
         return transaction if transaction and transaction_id == transaction.id and user_id == 5 else None
 
-    async def list_for_merchant(user_id, mapping_id):
-        return list(known)
+    async def get_mcc(mcc):
+        return mcc_type
+
+    async def list_near(merchant_key, latitude, longitude, radius_m):
+        return list(linked)
+
+    async def link(merchant_key, place_id):
+        calls["links"].append((merchant_key, place_id))
 
     async def upsert(place):
-        upserted.append(place)
+        calls["upserted"].append(place)
         return SimpleNamespace(id=99, latitude=place.latitude, longitude=place.longitude, name=place.name)
 
     service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user)
-    service.place_repo = SimpleNamespace(list_for_merchant=list_for_merchant, upsert=upsert)
-    return service, upserted
+    service.mcc_types = SimpleNamespace(get=get_mcc)
+    service.links = SimpleNamespace(list_near=list_near, link=link)
+    service.place_repo = SimpleNamespace(upsert=upsert)
+    return service, calls
 
 
-def transaction(mapping_id=7):
-    return SimpleNamespace(id=1, merchant_mapping_id=mapping_id, latitude=None, longitude=None, place=None)
+def transaction(description="KREDENS CAFE", mcc=5812):
+    return SimpleNamespace(id=1, description=description, mcc=mcc, latitude=None, longitude=None, place=None,
+                           place_method=None)
 
 
-async def test_location_reuses_known_merchant_place():
+async def test_location_skips_mcc_without_search():
+    tx = transaction(mcc=4829)
+    service, calls = location_service(tx, candidates=[found()], mcc_type=SimpleNamespace(searchable=False))
+    await service.set_location(1, LAT, LON)
+    assert (tx.place, tx.place_method, tx.latitude, calls["provider"].calls) == (None, PlaceMethod.SKIPPED, LAT, 0)
+
+
+async def test_location_skips_unknown_mcc():
+    tx = transaction(mcc=1234)
+    service, _ = location_service(tx, candidates=[found()], mcc_type=None)
+    await service.set_location(1, LAT, LON)
+    assert tx.place_method == PlaceMethod.SKIPPED
+
+
+async def test_location_uses_saved_link_without_search():
     tx = transaction()
-    known = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
+    near = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
     far = SimpleNamespace(id=4, latitude=LAT + 0.01, longitude=LON)
-    service, upserted = location_service(tx, known=[far, known], result=found())
+    service, calls = location_service(tx, candidates=[found()], linked=[far, near])
     await service.set_location(1, LAT, LON)
-    assert (tx.place, tx.latitude, tx.longitude, upserted, service.db.commits) == (known, LAT, LON, [], 1)
+    assert (tx.place, tx.place_method, calls["provider"].calls, calls["upserted"]) == (near, PlaceMethod.LINK, 0, [])
 
 
-async def test_location_looks_up_nearest_place():
-    tx = transaction(mapping_id=None)
-    service, upserted = location_service(tx, result=found("Кава"))
+async def test_confident_place_is_linked_to_merchant():
+    tx = transaction()
+    service, calls = location_service(tx, candidates=[found("Буденні бомбони", 3), found("KREDENS CAFE на Валовій", 11)])
     await service.set_location(1, LAT, LON)
-    assert tx.place.id == 99
-    assert [p.name for p in upserted] == ["Кава"]
+    assert (tx.place.name, tx.place_method, calls["links"]) == (
+        "KREDENS CAFE на Валовій", PlaceMethod.NAME_MATCH, [("kredens cafe", 99)],
+    )
+
+
+async def test_nearest_place_is_not_linked():
+    tx = transaction("ФОП Петренко О.І.")
+    service, calls = location_service(tx, candidates=[found("Шаурма", 12), found("Кава", 4)])
+    await service.set_location(1, LAT, LON)
+    assert (tx.place.name, tx.place_method, calls["links"]) == ("Кава", PlaceMethod.NEAREST, [])
+
+
+async def test_location_without_candidates():
+    tx = transaction()
+    service, calls = location_service(tx)
+    await service.set_location(1, LAT, LON)
+    assert (tx.place, tx.place_method, tx.latitude, calls["upserted"]) == (None, PlaceMethod.NOT_FOUND, LAT, [])
 
 
 async def test_location_saved_even_when_search_is_down():
     tx = transaction()
     service, _ = location_service(tx, fails=True)
     await service.set_location(1, LAT, LON)
-    assert (tx.place, tx.latitude, service.db.commits) == (None, LAT, 1)
+    assert (tx.place, tx.place_method, tx.latitude, service.db.commits) == (None, None, LAT, 1)
 
 
 async def test_location_for_foreign_transaction():
     service, _ = location_service(None)
     with pytest.raises(NotFoundError):
         await service.set_location(1, LAT, LON)
+
+
+async def test_compare_log_is_written(monkeypatch, tmp_path):
+    log = tmp_path / "places.jsonl"
+    monkeypatch.setattr(places, "PLACES_COMPARE_LOG", str(log))
+    tx = transaction()
+    service, _ = location_service(tx, candidates=[found("KREDENS CAFE")], compare=True)
+    await service.set_location(1, LAT, LON)
+    record = json.loads(log.read_text(encoding="utf-8"))
+    assert (record["transaction_id"], record["method"], record["chosen"]["name"]) == (1, "single", "KREDENS CAFE")
+    assert [p["name"] for p in record["providers"]["google"]] == ["KREDENS CAFE"]
