@@ -19,6 +19,7 @@ CATEGORIZATION_RETRY_DELAY_SECONDS = 300
 LOCATION_WAIT_SECONDS = 90
 LOCATION_MAX_AGE_SECONDS = 10 * 60
 LOCATION_REQUEST = "location_request"
+TRANSFER_MCCS = {4829, 6012}
 
 
 def needs_location(transaction: TransactionRaw, now: float | None = None) -> bool:
@@ -26,7 +27,9 @@ def needs_location(transaction: TransactionRaw, now: float | None = None) -> boo
         transaction.source == "monobank"
         and transaction.amount < 0
         and transaction.mcc is not None
+        and transaction.mcc not in TRANSFER_MCCS
         and transaction.counter_iban is None
+        and transaction.jar_id is None
         and transaction.latitude is None
         and (now or time.time()) - transaction.time <= LOCATION_MAX_AGE_SECONDS
     )
@@ -37,17 +40,18 @@ async def process_new_transaction(transaction_id: int) -> None:
         transaction = await TransactionRepository(db).get_by_id(transaction_id)
         if transaction is not None and needs_location(transaction):
             place_filter = await MccPlaceTypeRepository(db).get(transaction.mcc)
-            if place_filter is None or not place_filter.searchable:
+            searchable = place_filter is not None and place_filter.searchable
+            if not searchable:
                 transaction.place_method = PlaceMethod.SKIPPED
                 await db.commit()
-            else:
-                requested = await PushService(db).send_silent(
-                    transaction.user_id, {"type": LOCATION_REQUEST, "transaction_id": transaction_id},
-                )
-                if requested:
-                    logger.info("Location requested for transaction id=%s", transaction_id)
-                    spawn(_categorize_later(transaction_id, LOCATION_WAIT_SECONDS))
-                    return
+            requested = await PushService(db).send_silent(
+                transaction.user_id, {"type": LOCATION_REQUEST, "transaction_id": transaction_id},
+            )
+            if requested:
+                logger.info("Location requested for transaction id=%s", transaction_id)
+            if requested and searchable:
+                spawn(_categorize_later(transaction_id, LOCATION_WAIT_SECONDS))
+                return
     await run_categorization(transaction_id)
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from app.db.models.categories import Category
 from app.db.models.place import Place
 from app.db.models.transaction import TransactionRaw
+from app.repositories.place import HOME_CATEGORY_SLUGS
 
 # TODO: брати таймзону з налаштувань користувача, коли вони зявляться
 DEFAULT_TIMEZONE = "Europe/Kyiv"
@@ -146,7 +147,11 @@ class AnalyticsRepository:
             .select_from(TransactionRaw)
             .join(Category, Category.id == TransactionRaw.category_id)
             .join(group_category, group_category.id == func.coalesce(Category.parent_id, Category.id))
-            .outerjoin(Place, and_(Place.id == TransactionRaw.place_id, TransactionRaw.place_confirmed.is_not(False)))
+            .outerjoin(Place, and_(
+                Place.id == TransactionRaw.place_id,
+                TransactionRaw.place_confirmed.is_not(False),
+                Category.slug.not_in(HOME_CATEGORY_SLUGS),
+            ))
             .where(
                 TransactionRaw.user_id == user_id,
                 TransactionRaw.amount_uah.is_not(None),

@@ -9,7 +9,17 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.repositories.mcc_place_type import MccPlaceTypeRepository
 from app.repositories.place import PlaceRepository
-from app.schemas.place import PlaceBrief, PlaceCandidatesResponse, PlaceSpending
+from app.schemas.place import (
+    HomeCategorySpending,
+    HomeLocation,
+    HomeSpending,
+    PlaceBrief,
+    PlaceCandidatesResponse,
+    PlaceSpending,
+    PlacesMapResponse,
+    SetLocationRequest,
+)
+from app.services.home_location import Home, HomeService
 from app.services.place_matching import choose_place
 from app.services.places import PLACE_SEARCH_RADIUS_M, PlaceService
 
@@ -23,6 +33,10 @@ def _bounds(date_from: date | None, date_to: date | None) -> tuple[int | None, i
         int(datetime.combine(date_from, time.min, tzinfo=KYIV_TZ).timestamp()) if date_from else None,
         int(datetime.combine(date_to, time.max, tzinfo=KYIV_TZ).timestamp()) if date_to else None,
     )
+
+
+def _home_location(home: Home | None) -> HomeLocation | None:
+    return HomeLocation(latitude=home.latitude, longitude=home.longitude, source=home.source) if home else None
 
 
 def _spending(row) -> PlaceSpending:
@@ -49,7 +63,7 @@ async def place_candidates(
     return PlaceCandidatesResponse(searchable=True, candidates=candidates, chosen=chosen, method=method)
 
 
-@router.get("/map", response_model=list[PlaceSpending])
+@router.get("/map", response_model=PlacesMapResponse)
 async def places_map(
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
@@ -57,8 +71,44 @@ async def places_map(
     db: AsyncSession = Depends(get_db),
 ):
     ts_from, ts_to = _bounds(date_from, date_to)
-    rows = await PlaceRepository(db).spending_for_user(current_user.id, ts_from, ts_to)
-    return [_spending(row) for row in rows]
+    places = PlaceRepository(db)
+    rows = await places.spending_for_user(current_user.id, ts_from, ts_to)
+    categories = [
+        HomeCategorySpending(slug=slug, name=name, spent=spent, count=count)
+        for slug, name, spent, count in await places.home_spending(current_user.id, ts_from, ts_to)
+    ]
+    home = HomeSpending(
+        location=_home_location(await HomeService(db, current_user).location()),
+        spent=sum(category.spent for category in categories),
+        count=sum(category.count for category in categories),
+        categories=categories,
+    )
+    return PlacesMapResponse(places=[_spending(row) for row in rows], home=home)
+
+
+@router.get("/home", response_model=HomeLocation | None)
+async def get_home(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return _home_location(await HomeService(db, current_user).location())
+
+
+@router.put("/home", response_model=HomeLocation)
+async def set_home(
+    data: SetLocationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return _home_location(await HomeService(db, current_user).set(data.latitude, data.longitude))
+
+
+@router.delete("/home", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_home(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await HomeService(db, current_user).reset()
 
 
 @router.get("/{place_id}", response_model=PlaceSpending)

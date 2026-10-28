@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -44,6 +46,31 @@ class PlaceSpending(BaseModel):
     spent: int
     count: int
     last_time: int
+
+
+class HomeLocation(BaseModel):
+    latitude: float
+    longitude: float
+    source: Literal["auto", "user"]
+
+
+class HomeCategorySpending(BaseModel):
+    slug: str
+    name: str
+    spent: int
+    count: int
+
+
+class HomeSpending(BaseModel):
+    location: HomeLocation | None
+    spent: int
+    count: int
+    categories: list[HomeCategorySpending]
+
+
+class PlacesMapResponse(BaseModel):
+    places: list[PlaceSpending]
+    home: HomeSpending
 
 
 class SetLocationRequest(BaseModel):
