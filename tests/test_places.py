@@ -226,7 +226,7 @@ async def test_location_for_foreign_transaction():
 
 def located(place=None):
     tx = transaction()
-    tx.latitude, tx.longitude, tx.place, tx.place_confirmed = LAT, LON, place, None
+    tx.latitude, tx.longitude, tx.place, tx.place_confirmed, tx.rejected_place_id = LAT, LON, place, None, None
     return tx
 
 
@@ -261,8 +261,17 @@ async def test_rejected_place_replaced_by_chosen_candidate():
     tx = located(SimpleNamespace(id=7))
     service, calls = location_service(tx, candidates=[found("Сусід"), found("KREDENS CAFE")])
     await service.give_feedback(1, correct=False, place_id="GKREDENS CAFE")
-    assert (tx.place.id, tx.place.name, tx.place_confirmed) == (99, "KREDENS CAFE", False)
+    assert (tx.place.id, tx.place.name, tx.place_confirmed, tx.rejected_place_id) == (99, "KREDENS CAFE", True, 7)
     assert (calls["unlinks"], calls["links"]) == ([("kredens cafe", 7)], [("kredens cafe", 99)])
+
+
+async def test_repeated_location_keeps_first_result():
+    tx = located(SimpleNamespace(id=7))
+    tx.place_method, tx.place_confirmed = PlaceMethod.NEAREST, True
+    service, calls = location_service(tx, candidates=[found("Інший")])
+    await service.set_location(1, LAT + 0.001, LON)
+    assert (tx.place.id, tx.latitude, tx.place_method, tx.place_confirmed) == (7, LAT, PlaceMethod.NEAREST, True)
+    assert (calls["places"].calls, service.db.commits) == (0, 0)
 
 
 async def test_feedback_validation():

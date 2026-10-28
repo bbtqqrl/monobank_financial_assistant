@@ -29,6 +29,8 @@ class TransactionLocationService:
 
     async def set_location(self, transaction_id: int, latitude: float, longitude: float) -> TransactionRaw:
         transaction = await self._get(transaction_id)
+        if transaction.latitude is not None:
+            return transaction
         place, method = await self._locate(transaction, latitude, longitude)
         transaction.latitude = latitude
         transaction.longitude = longitude
@@ -50,14 +52,21 @@ class TransactionLocationService:
                 raise InvalidRequestError("place_id can only be sent with correct=false")
             if merchant_key:
                 await self.links.link(merchant_key, transaction.place.id)
+            transaction.place_confirmed = True
         else:
-            if transaction.place is not None and merchant_key:
-                await self.links.unlink(merchant_key, transaction.place.id)
+            wrong = transaction.place
+            if wrong is not None and merchant_key:
+                await self.links.unlink(merchant_key, wrong.id)
             if place_id:
-                transaction.place = await self._pick_candidate(transaction, place_id)
+                chosen = await self._pick_candidate(transaction, place_id)
+                if wrong is not None and wrong.id != chosen.id:
+                    transaction.rejected_place_id = wrong.id
+                transaction.place = chosen
+                transaction.place_confirmed = True
                 if merchant_key:
-                    await self.links.link(merchant_key, transaction.place.id)
-        transaction.place_confirmed = correct
+                    await self.links.link(merchant_key, chosen.id)
+            else:
+                transaction.place_confirmed = False
         await self.db.commit()
         return transaction
 
