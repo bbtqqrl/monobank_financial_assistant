@@ -8,7 +8,7 @@ from sqlalchemy.dialects import postgresql
 from app.repositories.place import PlaceRepository
 from app.schemas.place import PlaceResponse
 from app.services import places
-from app.services.errors import NotFoundError, ServiceUnavailableError
+from app.services.errors import InvalidRequestError, NotFoundError, ServiceUnavailableError
 from app.services.place_matching import PlaceMethod
 from app.services.places import PlaceService, distance_m
 from app.services.transaction_location_service import TransactionLocationService
@@ -50,6 +50,32 @@ async def test_google_returns_candidates_within_radius(monkeypatch):
     assert bodies[0]["includedTypes"] == ["restaurant", "cafe"]
     assert bodies[0]["rankPreference"] == "DISTANCE"
     assert bodies[0]["locationRestriction"]["circle"]["radius"] == 30
+
+
+async def test_google_place_details(monkeypatch):
+    monkeypatch.setattr(places, "GOOGLE_PLACES_API_KEY", "gkey")
+    detailed = google("Сільпо", LAT, LON, "supermarket") | {
+        "primaryTypeDisplayName": {"text": "Супермаркет", "languageCode": "uk"},
+        "shortFormattedAddress": "вулиця Шевченка, 44",
+        "addressComponents": [
+            {"longText": "44", "types": ["street_number"]},
+            {"longText": "Львів", "types": ["locality", "political"]},
+        ],
+        "googleMapsUri": "https://maps.google.com/?cid=1",
+    }
+    mask = []
+
+    def handler(request):
+        mask.append(request.headers["X-Goog-FieldMask"])
+        return httpx.Response(200, json={"places": [detailed, google("Без деталей", LAT, LON)]})
+
+    rich, bare = await PlaceService(httpx.MockTransport(handler)).search(LAT, LON, FOOD, 30)
+    assert (rich.type_name, rich.short_address, rich.city, rich.maps_url) == (
+        "Супермаркет", "вулиця Шевченка, 44", "Львів", "https://maps.google.com/?cid=1",
+    )
+    assert (bare.type_name, bare.city, bare.maps_url) == (None, None, None)
+    assert "places.googleMapsUri" in mask[0]
+    assert not {"places.rating", "places.priceRange", "places.regularOpeningHours"} & set(mask[0].split(","))
 
 
 async def test_google_skips_request_without_types(monkeypatch):
@@ -95,8 +121,9 @@ class FakePlaces:
     def __init__(self, candidates=(), fails=False):
         self.candidates, self.fails, self.calls = list(candidates), fails, 0
 
-    async def search(self, latitude, longitude, place_filter):
+    async def search(self, latitude, longitude, place_filter, radius_m=None):
         self.calls += 1
+        self.radius_m = radius_m
         if self.fails:
             raise ServiceUnavailableError("down")
         return self.candidates
@@ -105,7 +132,7 @@ class FakePlaces:
 def location_service(transaction, candidates=(), fails=False, linked=(), mcc_type=FOOD):
     fake_places = FakePlaces(candidates, fails)
     service = TransactionLocationService(FakeDb(), 5, fake_places)
-    calls = {"upserted": [], "links": [], "places": fake_places}
+    calls = {"upserted": [], "links": [], "unlinks": [], "places": fake_places}
 
     async def get_by_id_for_user(transaction_id, user_id):
         return transaction if transaction and transaction_id == transaction.id and user_id == 5 else None
@@ -119,13 +146,16 @@ def location_service(transaction, candidates=(), fails=False, linked=(), mcc_typ
     async def link(merchant_key, place_id):
         calls["links"].append((merchant_key, place_id))
 
+    async def unlink(merchant_key, place_id):
+        calls["unlinks"].append((merchant_key, place_id))
+
     async def upsert(place):
         calls["upserted"].append(place)
         return SimpleNamespace(id=99, latitude=place.latitude, longitude=place.longitude, name=place.name)
 
     service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user)
     service.mcc_types = SimpleNamespace(get=get_mcc)
-    service.links = SimpleNamespace(list_near=list_near, link=link)
+    service.links = SimpleNamespace(list_near=list_near, link=link, unlink=unlink)
     service.place_repo = SimpleNamespace(upsert=upsert)
     return service, calls
 
@@ -192,3 +222,71 @@ async def test_location_for_foreign_transaction():
     service, _ = location_service(None)
     with pytest.raises(NotFoundError):
         await service.set_location(1, LAT, LON)
+
+
+def located(place=None):
+    tx = transaction()
+    tx.latitude, tx.longitude, tx.place, tx.place_confirmed = LAT, LON, place, None
+    return tx
+
+
+async def test_candidates_are_searched_around_transaction():
+    service, calls = location_service(located(), candidates=[found("Кава")])
+    assert [p.name for p in await service.place_candidates(1)] == ["Кава"]
+    assert calls["places"].radius_m == 50
+
+
+async def test_candidates_need_location():
+    service, _ = location_service(transaction())
+    with pytest.raises(InvalidRequestError):
+        await service.place_candidates(1)
+
+
+async def test_confirmed_place_is_linked():
+    tx = located(SimpleNamespace(id=7))
+    service, calls = location_service(tx)
+    await service.give_feedback(1, correct=True)
+    assert (tx.place_confirmed, calls["links"], service.db.commits) == (True, [("kredens cafe", 7)], 1)
+
+
+async def test_rejected_place_is_kept_but_unlinked():
+    wrong = SimpleNamespace(id=7)
+    tx = located(wrong)
+    service, calls = location_service(tx)
+    await service.give_feedback(1, correct=False)
+    assert (tx.place, tx.place_confirmed, calls["unlinks"], calls["links"]) == (wrong, False, [("kredens cafe", 7)], [])
+
+
+async def test_rejected_place_replaced_by_chosen_candidate():
+    tx = located(SimpleNamespace(id=7))
+    service, calls = location_service(tx, candidates=[found("Сусід"), found("KREDENS CAFE")])
+    await service.give_feedback(1, correct=False, place_id="GKREDENS CAFE")
+    assert (tx.place.id, tx.place.name, tx.place_confirmed) == (99, "KREDENS CAFE", False)
+    assert (calls["unlinks"], calls["links"]) == ([("kredens cafe", 7)], [("kredens cafe", 99)])
+
+
+async def test_feedback_validation():
+    service, _ = location_service(located(None))
+    with pytest.raises(InvalidRequestError):
+        await service.give_feedback(1, correct=True)
+    service, _ = location_service(located(SimpleNamespace(id=7)), candidates=[found("Кава")])
+    with pytest.raises(InvalidRequestError):
+        await service.give_feedback(1, correct=False, place_id="Gчужий")
+    with pytest.raises(InvalidRequestError):
+        await service.give_feedback(1, correct=True, place_id="GКава")
+
+
+async def test_spending_query_skips_rejected_places_and_income():
+    statements = []
+
+    async def execute(statement):
+        statements.append(str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})))
+        return SimpleNamespace(all=lambda: [("place", 12000, 3, 1_800_000_000)])
+
+    rows = await PlaceRepository(SimpleNamespace(execute=execute)).spending_for_user(5, 100, 200, place_id=7)
+    assert rows == [("place", 12000, 3, 1_800_000_000)]
+    sql = statements[0]
+    assert "transactions.amount_uah < 0" in sql
+    assert "transactions.place_confirmed IS NOT false" in sql
+    assert "places.id = 7" in sql and "transactions.time >= 100" in sql and "transactions.time <= 200" in sql
+    assert "ORDER BY sum(-transactions.amount_uah) DESC" in sql

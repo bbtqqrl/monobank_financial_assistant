@@ -11,7 +11,10 @@ from app.services.errors import ServiceUnavailableError
 logger = logging.getLogger(__name__)
 
 GOOGLE_PLACES_URL = "https://places.googleapis.com/v1"
-GOOGLE_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType"
+GOOGLE_FIELD_MASK = ",".join([
+    "places.id", "places.displayName", "places.formattedAddress", "places.location", "places.primaryType",
+    "places.primaryTypeDisplayName", "places.shortFormattedAddress", "places.addressComponents", "places.googleMapsUri",
+])
 GOOGLE_MAX_RESULTS = 20
 EARTH_RADIUS_M = 6_371_000
 METERS_PER_DEGREE = 111_320
@@ -61,19 +64,36 @@ class PlaceService:
             logger.warning("Google Places search failed", exc_info=True)
             raise ServiceUnavailableError("Place search is unavailable")
         places = [
-            PlaceResponse(
-                provider=self.provider,
-                place_id=result["id"],
-                name=(result.get("displayName") or {}).get("text", ""),
-                category=result.get("primaryType"),
-                address=result.get("formattedAddress"),
-                latitude=result["location"]["latitude"],
-                longitude=result["location"]["longitude"],
-                distance_m=round(distance_m(
-                    latitude, longitude, result["location"]["latitude"], result["location"]["longitude"],
-                )),
-            )
-            for result in results
-            if result.get("id") and result.get("location")
+            _google_place(result, latitude, longitude) for result in results if result.get("id") and result.get("location")
         ]
         return sorted((p for p in places if p.distance_m <= radius_m), key=lambda p: p.distance_m)
+
+
+def _text(value: dict | None) -> str | None:
+    return (value or {}).get("text") or None
+
+
+def _city(components: list[dict]) -> str | None:
+    for wanted in ("locality", "postal_town", "administrative_area_level_2"):
+        for component in components:
+            if wanted in component.get("types", []):
+                return component.get("longText")
+    return None
+
+
+def _google_place(result: dict, latitude: float, longitude: float) -> PlaceResponse:
+    location = result["location"]
+    return PlaceResponse(
+        provider=PlaceService.provider,
+        place_id=result["id"],
+        name=_text(result.get("displayName")) or "",
+        category=result.get("primaryType"),
+        address=result.get("formattedAddress"),
+        latitude=location["latitude"],
+        longitude=location["longitude"],
+        distance_m=round(distance_m(latitude, longitude, location["latitude"], location["longitude"])),
+        type_name=_text(result.get("primaryTypeDisplayName")),
+        short_address=result.get("shortFormattedAddress"),
+        city=_city(result.get("addressComponents") or []),
+        maps_url=result.get("googleMapsUri"),
+    )

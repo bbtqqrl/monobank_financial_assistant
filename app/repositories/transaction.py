@@ -79,9 +79,12 @@ class TransactionRepository:
         limit: int = 30,
         currency_code: int | None = None,
         order: Literal["newest", "largest_expense"] = "newest",
+        place_id: int | None = None,
     ) -> tuple[list[tuple[TransactionRaw, Optional[Category], int]], int]:
         conditions = [TransactionRaw.user_id == user_id]
 
+        if place_id is not None:
+            conditions.append(TransactionRaw.place_id == place_id)
         if account_id is not None:
             conditions.append(TransactionRaw.account_id == account_id)
         if jar_id is not None:

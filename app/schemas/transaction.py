@@ -39,6 +39,7 @@ class TransactionListItem(BaseModel):
     longitude: float | None
     place: PlaceBrief | None
     place_method: str | None
+    place_confirmed: bool | None
 
 
 class TransactionDetail(TransactionListItem):

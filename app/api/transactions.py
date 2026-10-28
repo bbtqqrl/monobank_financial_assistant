@@ -9,7 +9,7 @@ from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
 from app.repositories.transaction import TransactionRepository
-from app.schemas.place import PlaceBrief, SetLocationRequest
+from app.schemas.place import PlaceBrief, PlaceFeedbackRequest, PlaceResponse, SetLocationRequest
 from app.schemas.transaction import (
     CategoryBrief,
     CreateTransactionRequest,
@@ -59,6 +59,7 @@ def _to_list_item(transaction, category, account_currency_code: int) -> Transact
         longitude=transaction.longitude,
         place=PlaceBrief.model_validate(transaction.place) if transaction.place is not None else None,
         place_method=transaction.place_method,
+        place_confirmed=transaction.place_confirmed,
     )
 
 
@@ -73,6 +74,7 @@ async def list_transactions(
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
     search: str | None = None,
+    place_id: int | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=30, ge=1, le=100),
 ):
@@ -89,6 +91,7 @@ async def list_transactions(
         date_from=ts_from,
         date_to=ts_to,
         search=search,
+        place_id=place_id,
         page=page,
         limit=limit,
     )
@@ -272,11 +275,33 @@ async def set_transaction_location(
     )
     if located.category_id is None:
         background_tasks.add_task(run_categorization, transaction_id)
+    return await _detail(db, transaction_id, current_user.id)
 
-    transactions = TransactionRepository(db)
-    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category, account_currency_code = row
 
+@router.get("/{transaction_id}/place/candidates", response_model=list[PlaceResponse])
+async def transaction_place_candidates(
+    transaction_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await TransactionLocationService(db, current_user.id).place_candidates(transaction_id)
+
+
+@router.patch("/{transaction_id}/place", response_model=TransactionDetail)
+async def give_place_feedback(
+    transaction_id: int,
+    data: PlaceFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await TransactionLocationService(db, current_user.id).give_feedback(transaction_id, data.correct, data.place_id)
+    return await _detail(db, transaction_id, current_user.id)
+
+
+async def _detail(db: AsyncSession, transaction_id: int, user_id: int) -> TransactionDetail:
+    transaction, category, account_currency_code = await TransactionRepository(db).get_detail_for_user(
+        transaction_id, user_id,
+    )
     return TransactionDetail(
         **_to_list_item(transaction, category, account_currency_code).model_dump(),
         balance=transaction.balance,
