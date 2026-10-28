@@ -187,3 +187,37 @@ class CurrenciesResponse(BaseModel):
     period: PeriodInfo
     total_uah: int
     items: list[CurrencyItem]
+
+
+class PlaceSpendItem(BaseModel):
+    place_id: int
+    name: str
+    type_name: str | None
+    city: str | None
+    amount: int
+    transaction_count: int
+    share: float
+
+
+class PlacesResponse(BaseModel):
+    period: PeriodInfo
+    total: int
+    unlocated_amount: int
+    place_count: int
+    limit: int
+    offset: int
+    items: list[PlaceSpendItem]
+
+
+class CityItem(BaseModel):
+    city: str
+    amount: int
+    transaction_count: int
+    share: float
+
+
+class CitiesResponse(BaseModel):
+    period: PeriodInfo
+    total: int
+    unlocated_amount: int
+    items: list[CityItem]

@@ -17,6 +17,8 @@ from app.schemas.analytics import (
     CategoryItem,
     CategoryRef,
     ChangesResponse,
+    CitiesResponse,
+    CityItem,
     ComparePreset,
     ComparisonInfo,
     CurrenciesResponse,
@@ -31,6 +33,8 @@ from app.schemas.analytics import (
     MonthTotal,
     OtherShare,
     PeriodInfo,
+    PlaceSpendItem,
+    PlacesResponse,
     RecurringItem,
     RecurringResponse,
     SpendingResponse,
@@ -196,11 +200,16 @@ def resolve_comparison(
 
 class AnalyticsService:
 
-    def __init__(self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None):
+    def __init__(
+        self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None,
+        place_ids: list[int] | None = None, cities: list[str] | None = None,
+    ):
         self.repo = AnalyticsRepository(db)
         self.user_id = user_id
         self.timezone = timezone
         self.account_ids = account_ids
+        self.place_ids = place_ids
+        self.city_names = cities
         self.today = datetime.now(ZoneInfo(timezone)).date()
         self.current_month = self.today.replace(day=1)
         self._history_start: date | None = None
@@ -272,7 +281,7 @@ class AnalyticsService:
         date_from, date_to = self._bounds(period)
         transactions = await self.repo.list_transactions(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
         )
 
@@ -439,10 +448,7 @@ class AnalyticsService:
         _, date_to = month_bounds(month, self.timezone)
         transactions = await self.repo.list_transactions(
             self.user_id,
-            TransactionFilter(
-                date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS,
-                category_ids=category_ids, account_ids=self.account_ids,
-            ),
+            self._filter(date_from, date_to, category_ids=category_ids),
             self.timezone,
         )
 
@@ -484,7 +490,7 @@ class AnalyticsService:
         date_from, date_to = self._bounds(period)
         rows = await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=["currency"],
             metrics=["sum", "count", "operation_sum"],
@@ -504,11 +510,57 @@ class AnalyticsService:
         items.sort(key=lambda item: -item.amount_uah)
         return CurrenciesResponse(period=period.info(), total_uah=total, items=items)
 
+    async def places(self, period: Period, limit: int, offset: int) -> PlacesResponse:
+        total, rows = await self._located(period, "place")
+        items = [
+            PlaceSpendItem(
+                place_id=row["place_id"],
+                name=row["place_name"],
+                type_name=row["place_type"],
+                city=row["place_city"],
+                amount=-row["sum"],
+                transaction_count=row["count"],
+                share=share(-row["sum"], total),
+            )
+            for row in rows
+        ]
+        items.sort(key=lambda item: (-item.amount, item.name))
+        return PlacesResponse(
+            period=period.info(),
+            total=total,
+            unlocated_amount=max(total - sum(item.amount for item in items), 0),
+            place_count=len(items),
+            limit=limit,
+            offset=offset,
+            items=items[offset:offset + limit],
+        )
+
+    async def cities(self, period: Period) -> CitiesResponse:
+        total, rows = await self._located(period, "city")
+        items = [
+            CityItem(city=row["city"], amount=-row["sum"], transaction_count=row["count"], share=share(-row["sum"], total))
+            for row in rows
+        ]
+        items.sort(key=lambda item: (-item.amount, item.city))
+        return CitiesResponse(
+            period=period.info(),
+            total=total,
+            unlocated_amount=max(total - sum(item.amount for item in items), 0),
+            items=items,
+        )
+
+    async def _located(self, period: Period, dimension: str) -> tuple[int, list[dict]]:
+        totals = await self._aggregate(period, [])
+        total = max(-totals[0]["sum"], 0) if totals else 0
+        rows = await self._aggregate(period, [dimension])
+        key = "place_id" if dimension == "place" else "city"
+        return total, [row for row in rows if row[key] is not None and -row["sum"] > 0]
+
     async def _aggregate(self, period: Period, group_by: list) -> list[dict]:
         date_from, date_to = self._bounds(period)
         return await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=group_by,
             metrics=["sum", "count"],
@@ -554,7 +606,7 @@ class AnalyticsService:
         _, date_to = month_bounds(last_month, self.timezone)
         rows = await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=["category", "day"],
             metrics=["sum"],
@@ -590,6 +642,12 @@ class AnalyticsService:
                 self._history_start = datetime.fromtimestamp(first_time, ZoneInfo(self.timezone)).date()
             self._history_loaded = True
         return self._history_start
+
+    def _filter(self, date_from: int, date_to: int, **extra) -> TransactionFilter:
+        return TransactionFilter(
+            date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS,
+            account_ids=self.account_ids, place_ids=self.place_ids, cities=self.city_names, **extra,
+        )
 
     def _bounds(self, period: Period) -> tuple[int, int]:
         tz = ZoneInfo(self.timezone)
