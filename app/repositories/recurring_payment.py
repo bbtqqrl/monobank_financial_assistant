@@ -1,4 +1,6 @@
-from sqlalchemy import select, update
+from datetime import datetime
+
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -74,6 +76,12 @@ class RecurringPaymentRepository:
             .execution_options(populate_existing=True)
         )
         return list(result.scalars().all())
+
+    async def first_created_at(self, user_id: int) -> datetime | None:
+        result = await self.db.execute(
+            select(func.min(RecurringPayment.created_at)).where(RecurringPayment.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_for_user(self, payment_id: int, user_id: int) -> RecurringPayment | None:
         result = await self.db.execute(

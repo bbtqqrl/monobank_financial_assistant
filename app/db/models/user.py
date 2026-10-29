@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Float, String
+from sqlalchemy import JSON, Boolean, Float, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.crypto import EncryptedString
@@ -31,6 +31,10 @@ class User(Base):
 
     home_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     home_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    disabled_notifications: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'"),
+    )
 
     accounts: Mapped[list["MonoAccount"]] = relationship(
         back_populates="user",

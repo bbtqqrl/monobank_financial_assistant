@@ -35,6 +35,8 @@ class RecurringPayment(Base):
     first_charge_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_charge_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     charges_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    price_changed_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

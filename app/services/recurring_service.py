@@ -12,6 +12,7 @@ from app.services.errors import InvalidRequestError, NotFoundError
 from app.services.recurring_detection import (
     DAY_SECONDS,
     SUBSCRIPTION,
+    SUBSCRIPTION_AMOUNT_TOLERANCE,
     Cluster,
     cluster_charges,
     detect_kind,
@@ -74,8 +75,17 @@ def _untouched(row: RecurringPayment) -> bool:
 
 
 def _apply(row: RecurringPayment, cluster: Cluster, kind: str | None) -> None:
+    amount, amount_uah = typical_amounts(cluster, kind)
+    if (
+        kind == SUBSCRIPTION
+        and row.amount is not None
+        and cluster.last.time > row.last_charge_at
+        and not similar(row.amount, amount, SUBSCRIPTION_AMOUNT_TOLERANCE)
+    ):
+        row.previous_amount = row.amount
+        row.price_changed_at = cluster.last.time
     row.kind = kind
-    row.amount, row.amount_uah = typical_amounts(cluster, kind)
+    row.amount, row.amount_uah = amount, amount_uah
     row.period_days = cluster.period_days
     row.first_charge_at = cluster.charges[0].time
     row.last_charge_at = cluster.last.time

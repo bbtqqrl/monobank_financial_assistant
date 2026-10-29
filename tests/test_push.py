@@ -87,3 +87,16 @@ async def test_push_failure_is_not_a_location_request():
     service, deleted = push_service([GOOD], delivered=0)
     assert await service.send_silent(5, {}) is False
     assert deleted == []
+
+
+async def test_expo_sends_visible_push():
+    sent = []
+
+    def handler(request):
+        sent.extend(json.loads(request.content))
+        return httpx.Response(200, json={"data": [{"status": "ok", "id": "1"}]})
+
+    delivered, _ = await ExpoPushClient(httpx.MockTransport(handler)).send_visible([GOOD], "Заголовок", "Текст", {"a": 1})
+    assert delivered == 1
+    assert sent[0] == {"to": GOOD, "title": "Заголовок", "body": "Текст", "data": {"a": 1}, "sound": "default",
+                       "priority": "high"}
