@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Float, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.crypto import EncryptedString
@@ -28,6 +28,9 @@ class User(Base):
     mono_client_id: Mapped[str | None] = mapped_column(String, unique=True, index=True, nullable=True)
     mono_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     mono_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    home_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     accounts: Mapped[list["MonoAccount"]] = relationship(
         back_populates="user",

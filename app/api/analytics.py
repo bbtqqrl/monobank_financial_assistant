@@ -12,10 +12,12 @@ from app.repositories.analytics import DEFAULT_TIMEZONE
 from app.schemas.analytics import (
     CategoriesResponse,
     ChangesResponse,
+    CitiesResponse,
     ComparePreset,
     InsightsResponse,
     MerchantsResponse,
     MonthlyResponse,
+    PlacesResponse,
     SpendingResponse,
 )
 from app.services.analytics_service import (
@@ -63,8 +65,23 @@ def compare_query(
     return CompareQuery(compare, compare_from, compare_to)
 
 
-def _service(db: AsyncSession, user: User, account_ids: list[int] | None) -> AnalyticsService:
-    return AnalyticsService(db, user.id, DEFAULT_TIMEZONE, account_ids)
+@dataclass
+class ScopeQuery:
+    account_ids: list[int] | None
+    place_ids: list[int] | None
+    cities: list[str] | None
+
+
+def scope_query(
+    account_ids: list[int] | None = Query(default=None),
+    place_ids: list[int] | None = Query(default=None),
+    cities: list[str] | None = Query(default=None),
+) -> ScopeQuery:
+    return ScopeQuery(account_ids, place_ids, cities)
+
+
+def _service(db: AsyncSession, user: User, scope: ScopeQuery) -> AnalyticsService:
+    return AnalyticsService(db, user.id, DEFAULT_TIMEZONE, scope.account_ids, scope.place_ids, scope.cities)
 
 
 def _resolve(
@@ -91,11 +108,11 @@ def _month(service: AnalyticsService, month: str | None) -> date:
 async def analytics_spending(
     period: PeriodQuery = Depends(period_query),
     compare: CompareQuery = Depends(compare_query),
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     resolved, comparison = _resolve(service, period, compare)
     return await service.spending(resolved, comparison)
 
@@ -106,11 +123,11 @@ async def analytics_categories(
     compare: CompareQuery = Depends(compare_query),
     top: int | None = Query(default=None, ge=1, le=50),
     sort: Literal["amount", "count", "change"] = "amount",
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     resolved, comparison = _resolve(service, period, compare)
     return await service.categories(resolved, comparison, top, sort)
 
@@ -120,13 +137,39 @@ async def analytics_merchants(
     period: PeriodQuery = Depends(period_query),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     resolved, _ = _resolve(service, period)
     return await service.merchants(resolved, limit, offset)
+
+
+@router.get("/places", response_model=PlacesResponse)
+async def analytics_places(
+    period: PeriodQuery = Depends(period_query),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    scope: ScopeQuery = Depends(scope_query),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = _service(db, current_user, scope)
+    resolved, _ = _resolve(service, period)
+    return await service.places(resolved, limit, offset)
+
+
+@router.get("/cities", response_model=CitiesResponse)
+async def analytics_cities(
+    period: PeriodQuery = Depends(period_query),
+    scope: ScopeQuery = Depends(scope_query),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = _service(db, current_user, scope)
+    resolved, _ = _resolve(service, period)
+    return await service.cities(resolved)
 
 
 @router.get("/changes", response_model=ChangesResponse)
@@ -134,11 +177,11 @@ async def analytics_changes(
     period: PeriodQuery = Depends(period_query),
     compare: CompareQuery = Depends(compare_query),
     limit: int = Query(default=4, ge=1, le=20),
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     resolved, comparison = _resolve(service, period, compare)
     return await service.changes(resolved, comparison, limit)
 
@@ -147,20 +190,20 @@ async def analytics_changes(
 async def analytics_monthly(
     month: str | None = Query(default=None, pattern=MONTH_PATTERN),
     months: int = Query(default=6, ge=2, le=12),
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     return await service.monthly(_month(service, month), months)
 
 
 @router.get("/insights", response_model=InsightsResponse)
 async def analytics_insights(
     month: str | None = Query(default=None, pattern=MONTH_PATTERN),
-    account_ids: list[int] | None = Query(default=None),
+    scope: ScopeQuery = Depends(scope_query),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = _service(db, current_user, account_ids)
+    service = _service(db, current_user, scope)
     return await service.insights(_month(service, month))

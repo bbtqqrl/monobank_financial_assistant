@@ -16,7 +16,7 @@ class ExpoPushClient:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         self._transport = transport
 
-    async def send_silent(self, push_tokens: list[str], data: dict) -> list[str]:
+    async def send_silent(self, push_tokens: list[str], data: dict) -> tuple[int, list[str]]:
         headers = {"Authorization": f"Bearer {EXPO_ACCESS_TOKEN}"} if EXPO_ACCESS_TOKEN else {}
         messages = [
             {"to": token, "data": data, "priority": "high", "_contentAvailable": True}
@@ -27,17 +27,20 @@ class ExpoPushClient:
                 response = await client.post(EXPO_PUSH_URL, json=messages, headers=headers)
                 response.raise_for_status()
                 tickets = response.json().get("data", [])
-        except httpx.HTTPError:
+        except (httpx.HTTPError, ValueError):
             logger.warning("Expo push failed", exc_info=True)
-            return []
+            return 0, []
+        delivered = 0
         unregistered = []
         for token, ticket in zip(push_tokens, tickets):
-            if ticket.get("status") == "error":
+            if ticket.get("status") == "ok":
+                delivered += 1
+            elif ticket.get("status") == "error":
                 error = (ticket.get("details") or {}).get("error")
                 logger.warning("Expo push rejected: %s %s", error, ticket.get("message"))
                 if error == UNREGISTERED_ERROR:
                     unregistered.append(token)
-        return unregistered
+        return delivered, unregistered
 
 
 class PushService:
@@ -50,8 +53,8 @@ class PushService:
         tokens = await self.devices.list_tokens(user_id)
         if not tokens:
             return False
-        unregistered = await self.client.send_silent(tokens, data)
+        delivered, unregistered = await self.client.send_silent(tokens, data)
         if unregistered:
             await self.devices.delete_tokens(unregistered)
             await self.db.commit()
-        return len(unregistered) < len(tokens)
+        return delivered > 0

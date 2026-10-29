@@ -9,7 +9,9 @@ from app.core.currencies import known_amount_uah
 from app.db.models.categories import Category
 from app.db.models.mono_accounts import MonoAccount
 from app.db.models.mono_jars import MonoJar
+from app.db.models.place import Place
 from app.db.models.transaction import TransactionRaw
+from app.repositories.place import not_home_category
 from app.schemas.monobank import MonoTransactionSchema
 
 
@@ -79,9 +81,18 @@ class TransactionRepository:
         limit: int = 30,
         currency_code: int | None = None,
         order: Literal["newest", "largest_expense"] = "newest",
+        place_id: int | None = None,
+        city: str | None = None,
     ) -> tuple[list[tuple[TransactionRaw, Optional[Category], int]], int]:
         conditions = [TransactionRaw.user_id == user_id]
 
+        if place_id is not None or city is not None:
+            conditions.append(TransactionRaw.place_confirmed.is_not(False))
+            conditions.append(not_home_category())
+        if place_id is not None:
+            conditions.append(TransactionRaw.place_id == place_id)
+        if city is not None:
+            conditions.append(TransactionRaw.place_id.in_(select(Place.id).where(Place.city == city)))
         if account_id is not None:
             conditions.append(TransactionRaw.account_id == account_id)
         if jar_id is not None:

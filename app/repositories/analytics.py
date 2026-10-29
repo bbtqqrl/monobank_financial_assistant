@@ -3,17 +3,19 @@ from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Integer, cast, func, or_, select
+from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.models.categories import Category
+from app.db.models.place import Place
 from app.db.models.transaction import TransactionRaw
+from app.repositories.place import HOME_CATEGORY_SLUGS
 
 # TODO: брати таймзону з налаштувань користувача, коли вони зявляться
 DEFAULT_TIMEZONE = "Europe/Kyiv"
 
-Dimension = Literal["category", "leaf_category", "day", "week", "month", "weekday", "currency"]
+Dimension = Literal["category", "leaf_category", "day", "week", "month", "weekday", "currency", "place", "city"]
 Metric = Literal["sum", "count", "avg", "min", "max", "operation_sum"]
 
 
@@ -36,6 +38,8 @@ class TransactionFilter:
     min_amount: int | None = None
     max_amount: int | None = None
     weekdays: list[int] | None = None
+    place_ids: list[int] | None = None
+    cities: list[str] | None = None
 
 
 class AnalyticsRepository:
@@ -73,6 +77,13 @@ class AnalyticsRepository:
             "month": [func.to_char(local_time, "YYYY-MM").label("month")],
             "weekday": [weekday.label("weekday")],
             "currency": [TransactionRaw.currency_code.label("currency_code")],
+            "place": [
+                Place.id.label("place_id"),
+                Place.name.label("place_name"),
+                Place.type_name.label("place_type"),
+                Place.city.label("place_city"),
+            ],
+            "city": [Place.city.label("city")],
         }
         metric_columns = {
             "sum": func.coalesce(func.sum(TransactionRaw.amount_uah), 0).label("sum"),
@@ -136,6 +147,11 @@ class AnalyticsRepository:
             .select_from(TransactionRaw)
             .join(Category, Category.id == TransactionRaw.category_id)
             .join(group_category, group_category.id == func.coalesce(Category.parent_id, Category.id))
+            .outerjoin(Place, and_(
+                Place.id == TransactionRaw.place_id,
+                TransactionRaw.place_confirmed.is_not(False),
+                Category.slug.not_in(HOME_CATEGORY_SLUGS),
+            ))
             .where(
                 TransactionRaw.user_id == user_id,
                 TransactionRaw.amount_uah.is_not(None),
@@ -169,6 +185,10 @@ class AnalyticsRepository:
             conditions.append(TransactionRaw.amount_uah <= filters.max_amount)
         if filters.weekdays:
             conditions.append(weekday.in_(filters.weekdays))
+        if filters.place_ids:
+            conditions.append(Place.id.in_(filters.place_ids))
+        if filters.cities:
+            conditions.append(Place.city.in_(filters.cities))
         return conditions
 
     @staticmethod

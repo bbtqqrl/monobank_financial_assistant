@@ -44,6 +44,7 @@ from app.services.assistant.actions import (
 from app.services.budget_service import BudgetService
 from app.services.category_service import CategoryService
 from app.services.errors import ServiceError
+from app.services.recurring_service import RecurringService, in_monthly_total, payments_summary
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ CURRENCY_CODES = {alpha: numeric for numeric, alpha in ISO_ALPHA.items()}
 MONEY_KEYS = frozenset({
     "total", "total_uah", "expected", "amount", "amount_uah", "operation_amount", "current", "baseline", "diff",
     "average", "balance", "credit_limit", "goal", "current_amount", "median", "typical_amount", "monthly_amount",
-    "old_amount", "new_amount",
+    "old_amount", "new_amount", "unlocated_amount", "subscription_monthly", "regular_monthly",
 })
 ACCOUNT_TYPE_NAMES = {
     "black": "Чорна картка",
@@ -108,6 +109,12 @@ class PeriodArgs(BaseModel):
     account_ids: list[int] | None = Field(
         default=None, description="Тільки ці рахунки (id з get_accounts). Без нього всі рахунки.",
     )
+    place_ids: list[int] | None = Field(
+        default=None, description="Тільки витрати в цих закладах (place_id з get_places або search_transactions).",
+    )
+    cities: list[str] | None = Field(
+        default=None, description="Тільки витрати в цих містах, назви як у get_cities («Львів», «Відень»).",
+    )
 
 
 class CompareArgs(PeriodArgs):
@@ -137,6 +144,11 @@ class MerchantsArgs(PeriodArgs):
     offset: int = Field(default=0, ge=0)
 
 
+class PlacesArgs(PeriodArgs):
+    limit: int = Field(default=10, ge=1, le=50)
+    offset: int = Field(default=0, ge=0)
+
+
 class ChangesArgs(CompareArgs):
     limit: int = Field(default=5, ge=1, le=20)
 
@@ -146,6 +158,12 @@ class MonthArgs(BaseModel):
 
     month: str | None = Field(default=None, pattern=MONTH_PATTERN, description="Місяць YYYY-MM. Без нього поточний.")
     account_ids: list[int] | None = Field(default=None, description="Тільки ці рахунки. Без нього всі.")
+    place_ids: list[int] | None = Field(
+        default=None, description="Тільки витрати в цих закладах (place_id з get_places або search_transactions).",
+    )
+    cities: list[str] | None = Field(
+        default=None, description="Тільки витрати в цих містах, назви як у get_cities («Львів», «Відень»).",
+    )
 
 
 class MonthlyArgs(MonthArgs):
@@ -156,9 +174,12 @@ class CategoryHistoryArgs(MonthlyArgs):
     category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії верхнього рівня. Без нього всі.")
 
 
-class RecurringArgs(MonthlyArgs):
-    category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії; батьківська охоплює дочірні.")
-    limit: int = Field(default=20, ge=1, le=50)
+class RecurringArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["subscription", "regular"] | None = Field(
+        default=None, description="subscription - підписки, regular - регулярні платежі. Без нього обидва.",
+    )
 
 
 class CategoryTreeArgs(BaseModel):
@@ -270,12 +291,14 @@ class SearchTransactionsArgs(BaseModel):
     date_to: date | None = Field(default=None, description="По цю дату YYYY-MM-DD включно.")
     account_id: int | None = None
     jar_id: int | None = None
+    place_id: int | None = Field(default=None, description="Тільки транзакції в цьому закладі.")
+    city: str | None = Field(default=None, max_length=100, description="Тільки транзакції в цьому місті.")
     limit: int = Field(default=20, ge=1, le=50)
     page: int = Field(default=1, ge=1)
 
 
-def _analytics(ctx: ToolContext, account_ids: list[int] | None) -> AnalyticsService:
-    return AnalyticsService(ctx.db, ctx.user_id, ctx.timezone, account_ids)
+def _analytics(ctx: ToolContext, args: PeriodArgs | MonthArgs) -> AnalyticsService:
+    return AnalyticsService(ctx.db, ctx.user_id, ctx.timezone, args.account_ids, args.place_ids, args.cities)
 
 
 def _period(service: AnalyticsService, args: PeriodArgs) -> Period:
@@ -295,48 +318,60 @@ def _month(service: AnalyticsService, month: str | None) -> date:
 
 
 async def get_spending(ctx: ToolContext, args: CompareArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     period = _period(service, args)
     result = await service.spending(period, _comparison(period, args))
     return result.model_dump(mode="json", exclude={"daily"})
 
 
 async def get_categories_breakdown(ctx: ToolContext, args: CategoriesArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     period = _period(service, args)
     result = await service.categories(period, _comparison(period, args), args.top, args.sort)
     return result.model_dump(mode="json")
 
 
 async def get_merchants(ctx: ToolContext, args: MerchantsArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     result = await service.merchants(_period(service, args), args.limit, args.offset)
     data = result.model_dump(mode="json")
     data["merchant_count"] = data.pop("total")
     return data
 
 
+async def get_places(ctx: ToolContext, args: PlacesArgs) -> dict:
+    service = _analytics(ctx, args)
+    result = await service.places(_period(service, args), args.limit, args.offset)
+    return result.model_dump(mode="json")
+
+
+async def get_cities(ctx: ToolContext, args: PeriodArgs) -> dict:
+    service = _analytics(ctx, args)
+    result = await service.cities(_period(service, args))
+    return result.model_dump(mode="json")
+
+
 async def get_changes(ctx: ToolContext, args: ChangesArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     period = _period(service, args)
     result = await service.changes(period, _comparison(period, args), args.limit)
     return result.model_dump(mode="json")
 
 
 async def get_monthly(ctx: ToolContext, args: MonthlyArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     result = await service.monthly(_month(service, args.month), args.months)
     return result.model_dump(mode="json")
 
 
 async def get_insights(ctx: ToolContext, args: MonthArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     result = await service.insights(_month(service, args.month))
     return result.model_dump(mode="json", exclude={"items": {"__all__": {"action"}}})
 
 
 async def get_category_history(ctx: ToolContext, args: CategoryHistoryArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     result = await service.category_history(_month(service, args.month), args.months)
     if args.category_ids:
         result.items = [item for item in result.items if item.category_id in args.category_ids]
@@ -344,13 +379,37 @@ async def get_category_history(ctx: ToolContext, args: CategoryHistoryArgs) -> d
 
 
 async def get_recurring(ctx: ToolContext, args: RecurringArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
-    result = await service.recurring(_month(service, args.month), args.months, args.limit, args.category_ids)
-    return result.model_dump(mode="json")
+    now = int(datetime.now().timestamp())
+    result = payments_summary(await RecurringService(ctx.db).list(ctx.user_id, args.kind, now), now)
+    zone = ZoneInfo(ctx.timezone)
+    totals = {"subscription": 0, "regular": 0}
+    items = []
+    for item in result.items:
+        if in_monthly_total(item):
+            totals[item.kind] += item.monthly_amount_uah
+        items.append({
+            "id": item.id,
+            "kind": item.kind,
+            "name": item.name,
+            "category": item.category.name if item.category else None,
+            "amount": item.amount,
+            "currency": item.currency,
+            "amount_uah": item.amount_uah,
+            "monthly_amount": item.monthly_amount_uah,
+            "period_days": item.period_days,
+            "last_charge": datetime.fromtimestamp(item.last_charge_at, zone).date().isoformat(),
+            "next_charge": datetime.fromtimestamp(item.next_charge_at, zone).date().isoformat(),
+            "charges_count": item.charges_count,
+            "state": item.state,
+            "confirmed": item.confirmed,
+            "cancelled": item.cancelled,
+        })
+    monthly = {f"{kind}_monthly": total for kind, total in totals.items() if args.kind in (None, kind)}
+    return {**monthly, "items": items}
 
 
 async def get_currency_breakdown(ctx: ToolContext, args: PeriodArgs) -> dict:
-    service = _analytics(ctx, args.account_ids)
+    service = _analytics(ctx, args)
     result = await service.currencies(_period(service, args))
     return result.model_dump(mode="json")
 
@@ -417,13 +476,17 @@ async def search_transactions(ctx: ToolContext, args: SearchTransactionsArgs) ->
         limit=args.limit,
         currency_code=currency_code,
         order=args.sort,
+        place_id=args.place_id,
+        city=args.city,
     )
     result = {
         "total_count": total,
         "page": args.page,
         "items": [_transaction_item(transaction, category, currency, zone) for transaction, category, currency in rows],
     }
-    narrowing = [name for name in ("type", "currency", "category_id") if getattr(args, name) is not None]
+    narrowing = [
+        name for name in ("type", "currency", "category_id", "place_id", "city") if getattr(args, name) is not None
+    ]
     if total == 0 and narrowing:
         result["hint"] = (
             f"Nothing found with filters {narrowing}. Before saying there is nothing, search again without them: "
@@ -540,6 +603,9 @@ def _transaction_item(transaction, category, account_currency: int, zone: ZoneIn
     if account_currency != UAH:
         item["amount_uah"] = transaction.amount_uah
     item["category"] = {"id": category.id, "name": category.name} if category else None
+    place = transaction.place
+    if place is not None and transaction.place_confirmed is not False:
+        item["place"] = {"id": place.id, "name": place.name, "type": place.type_name, "city": place.city}
     item["account_id"] = transaction.account_id
     item["jar_id"] = transaction.jar_id
     if transaction.source == "manual":
@@ -572,6 +638,26 @@ READ_TOOLS = (
         handler=get_merchants,
     ),
     Tool(
+        name="get_places",
+        label="Дивлюся, де ти витрачаєш",
+        description=(
+            "Заклади, де за період витрачено найбільше: назва, тип, місто, сума, кількість, частка. "
+            "Місце відоме не для всіх транзакцій: unlocated_amount - витрати без визначеного закладу."
+        ),
+        args=PlacesArgs,
+        handler=get_places,
+    ),
+    Tool(
+        name="get_cities",
+        label="Рахую витрати по містах",
+        description=(
+            "Витрати за період по містах, де були покупки: сума, кількість, частка. "
+            "unlocated_amount - витрати без визначеного місця. Для питань про поїздки й витрати в конкретному місті."
+        ),
+        args=PeriodArgs,
+        handler=get_cities,
+    ),
+    Tool(
         name="get_changes",
         label="Порівнюю з минулим",
         description="Категорії, витрати в яких найбільше змінилися проти бази порівняння.",
@@ -600,10 +686,12 @@ READ_TOOLS = (
         name="get_recurring",
         label="Шукаю регулярні платежі",
         description=(
-            "Мерчанти й люди, яким платили щонайменше у двох різних місяцях з months: підписки, сервіси, перекази тим самим людям, "
-            "звичні магазини. months_seen - у скількох місяцях були платежі, typical_amount - медіана одного платежу, "
-            "monthly_amount - медіана суми за місяць, stable_amount - сума майже не змінюється (схоже на підписку). "
-            "Відсортовано за monthly_amount."
+            "Підписки й регулярні платежі людини, ті самі, що вона бачить на екрані. subscription - автоматичне щомісячне "
+            "списання сервісу (та сама сума раз на 28-35 днів); regular - те, що людина платить сама й систематично "
+            "(зв'язок, інтернет тощо). amount - сума одного списання у валюті currency, monthly_amount - у гривнях на місяць. "
+            "state: active - списується вчасно, missing - пропущено списання (можливо, скасована), inactive - давно не було. "
+            "confirmed - людина сама підтвердила, cancelled - позначила скасованою. subscription_monthly і regular_monthly - "
+            "суми на місяць без скасованих і неактивних. Перекази людям і звичайні магазини сюди не входять."
         ),
         args=RecurringArgs,
         handler=get_recurring,

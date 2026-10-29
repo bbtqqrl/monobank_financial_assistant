@@ -68,6 +68,16 @@ class TransactionRaw(Base):
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     place_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    place_confirmed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rejected_place_id: Mapped[int | None] = mapped_column(
+        ForeignKey("places.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    recurring_payment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_payments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)
@@ -119,7 +129,7 @@ class TransactionRaw(Base):
         back_populates="transactions",
     )
 
-    place: Mapped["Place | None"] = relationship(lazy="selectin")
+    place: Mapped["Place | None"] = relationship(lazy="selectin", foreign_keys=[place_id])
 
     __table_args__ = (
         # Monobank transactions start uncategorized and get a category in the

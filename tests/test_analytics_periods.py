@@ -8,7 +8,6 @@ from app.services.analytics_service import (
     change_pct,
     format_uah,
     growth_streak,
-    is_stable,
     resolve_comparison,
     resolve_period,
     share,
@@ -95,16 +94,3 @@ def test_number_helpers():
     assert growth_streak([1, 2, 3, 4]) == 3
     assert growth_streak([5, 1, 2]) == 1
     assert growth_streak([3, 2]) == 0
-
-
-@pytest.mark.parametrize(
-    ("amounts", "typical", "expected"),
-    [
-        ([26000, 26000, 26000, 50000], 26000, True),
-        ([26000, 50000, 50000, 26000], 38000, False),
-        ([10000, 20000, 30000], 20000, False),
-        ([0, 0], 0, False),
-    ],
-)
-def test_is_stable(amounts, typical, expected):
-    assert is_stable(amounts, typical) is expected

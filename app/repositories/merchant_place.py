@@ -1,6 +1,6 @@
 import math
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,4 +33,9 @@ class MerchantPlaceRepository:
             pg_insert(MerchantPlace)
             .values(merchant_key=merchant_key, place_id=place_id)
             .on_conflict_do_update(constraint="uq_merchant_places_merchant_place", set_={"updated_at": func.now()})
+        )
+
+    async def unlink(self, merchant_key: str, place_id: int) -> None:
+        await self.db.execute(
+            delete(MerchantPlace).where(MerchantPlace.merchant_key == merchant_key, MerchantPlace.place_id == place_id)
         )

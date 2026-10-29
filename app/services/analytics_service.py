@@ -17,6 +17,8 @@ from app.schemas.analytics import (
     CategoryItem,
     CategoryRef,
     ChangesResponse,
+    CitiesResponse,
+    CityItem,
     ComparePreset,
     ComparisonInfo,
     CurrenciesResponse,
@@ -31,8 +33,8 @@ from app.schemas.analytics import (
     MonthTotal,
     OtherShare,
     PeriodInfo,
-    RecurringItem,
-    RecurringResponse,
+    PlaceSpendItem,
+    PlacesResponse,
     SpendingResponse,
 )
 from app.core.currencies import alpha_code
@@ -47,9 +49,6 @@ MIN_GROWTH_STREAK = 2
 INSIGHT_WINDOW_MONTHS = 6
 MAX_INSIGHTS = 3
 EQUAL_TOLERANCE = 0.01
-MIN_RECURRING_MONTHS = 2
-STABLE_AMOUNT_SPREAD = 0.15
-STABLE_PAYMENTS_SHARE = 0.7
 
 MONTH_LOCATIVE = (
     "січні", "лютому", "березні", "квітні", "травні", "червні",
@@ -130,13 +129,6 @@ def format_uah(kopecks: int) -> str:
     return f"{round(kopecks / 100):,}".replace(",", " ") + " ₴"
 
 
-def is_stable(amounts: list[int], typical: int) -> bool:
-    if typical <= 0:
-        return False
-    close = sum(1 for amount in amounts if abs(amount - typical) <= typical * STABLE_AMOUNT_SPREAD)
-    return close / len(amounts) >= STABLE_PAYMENTS_SHARE
-
-
 def growth_streak(values: list[int]) -> int:
     streak = 0
     for i in range(len(values) - 1, 0, -1):
@@ -196,11 +188,16 @@ def resolve_comparison(
 
 class AnalyticsService:
 
-    def __init__(self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None):
+    def __init__(
+        self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None,
+        place_ids: list[int] | None = None, cities: list[str] | None = None,
+    ):
         self.repo = AnalyticsRepository(db)
         self.user_id = user_id
         self.timezone = timezone
         self.account_ids = account_ids
+        self.place_ids = place_ids
+        self.city_names = cities
         self.today = datetime.now(ZoneInfo(timezone)).date()
         self.current_month = self.today.replace(day=1)
         self._history_start: date | None = None
@@ -272,7 +269,7 @@ class AnalyticsService:
         date_from, date_to = self._bounds(period)
         transactions = await self.repo.list_transactions(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
         )
 
@@ -431,60 +428,11 @@ class AnalyticsService:
         items.sort(key=lambda item: (-item.median, -item.average, item.name))
         return CategoryHistoryResponse(month=month_key(month), months=totals, items=items)
 
-    async def recurring(
-        self, month: date, months: int, limit: int, category_ids: list[int] | None = None,
-    ) -> RecurringResponse:
-        window = [month_key(add_months(month, offset)) for offset in range(-(months - 1), 1)]
-        date_from, _ = month_bounds(parse_month(window[0]), self.timezone)
-        _, date_to = month_bounds(month, self.timezone)
-        transactions = await self.repo.list_transactions(
-            self.user_id,
-            TransactionFilter(
-                date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS,
-                category_ids=category_ids, account_ids=self.account_ids,
-            ),
-            self.timezone,
-        )
-
-        zone = ZoneInfo(self.timezone)
-        groups: dict[str, list[dict]] = defaultdict(list)
-        for transaction in transactions:
-            if transaction["amount_uah"] >= 0:
-                continue
-            key = build_merchant_key(transaction["description"]) or transaction["description"].strip().lower()
-            groups[key].append({**transaction, "day": datetime.fromtimestamp(transaction["time"], zone).date()})
-
-        items = []
-        for key, payments in groups.items():
-            by_month: dict[str, int] = defaultdict(int)
-            for payment in payments:
-                by_month[month_key(payment["day"])] -= payment["amount_uah"]
-            if len(by_month) < MIN_RECURRING_MONTHS:
-                continue
-            amounts = [-payment["amount_uah"] for payment in payments]
-            typical = round(statistics.median(amounts))
-            category_id, category_name, category_slug = Counter(
-                (payment["category_id"], payment["category_name"], payment["category_slug"]) for payment in payments
-            ).most_common(1)[0][0]
-            items.append(RecurringItem(
-                merchant_key=key,
-                name=Counter(payment["description"].strip() for payment in payments).most_common(1)[0][0],
-                category=CategoryRef(id=category_id, name=category_name, slug=category_slug),
-                months_seen=len(by_month),
-                payment_count=len(payments),
-                typical_amount=typical,
-                monthly_amount=round(statistics.median(by_month.values())),
-                stable_amount=is_stable(amounts, typical),
-                last_date=max(payment["day"] for payment in payments),
-            ))
-        items.sort(key=lambda item: (-item.monthly_amount, -item.months_seen, item.name))
-        return RecurringResponse(months=window, items=items[:limit])
-
     async def currencies(self, period: Period) -> CurrenciesResponse:
         date_from, date_to = self._bounds(period)
         rows = await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=["currency"],
             metrics=["sum", "count", "operation_sum"],
@@ -504,11 +452,57 @@ class AnalyticsService:
         items.sort(key=lambda item: -item.amount_uah)
         return CurrenciesResponse(period=period.info(), total_uah=total, items=items)
 
+    async def places(self, period: Period, limit: int, offset: int) -> PlacesResponse:
+        total, rows = await self._located(period, "place")
+        items = [
+            PlaceSpendItem(
+                place_id=row["place_id"],
+                name=row["place_name"],
+                type_name=row["place_type"],
+                city=row["place_city"],
+                amount=-row["sum"],
+                transaction_count=row["count"],
+                share=share(-row["sum"], total),
+            )
+            for row in rows
+        ]
+        items.sort(key=lambda item: (-item.amount, item.name))
+        return PlacesResponse(
+            period=period.info(),
+            total=total,
+            unlocated_amount=max(total - sum(item.amount for item in items), 0),
+            place_count=len(items),
+            limit=limit,
+            offset=offset,
+            items=items[offset:offset + limit],
+        )
+
+    async def cities(self, period: Period) -> CitiesResponse:
+        total, rows = await self._located(period, "city")
+        items = [
+            CityItem(city=row["city"], amount=-row["sum"], transaction_count=row["count"], share=share(-row["sum"], total))
+            for row in rows
+        ]
+        items.sort(key=lambda item: (-item.amount, item.city))
+        return CitiesResponse(
+            period=period.info(),
+            total=total,
+            unlocated_amount=max(total - sum(item.amount for item in items), 0),
+            items=items,
+        )
+
+    async def _located(self, period: Period, dimension: str) -> tuple[int, list[dict]]:
+        totals = await self._aggregate(period, [])
+        total = max(-totals[0]["sum"], 0) if totals else 0
+        rows = await self._aggregate(period, [dimension])
+        key = "place_id" if dimension == "place" else "city"
+        return total, [row for row in rows if row[key] is not None and -row["sum"] > 0]
+
     async def _aggregate(self, period: Period, group_by: list) -> list[dict]:
         date_from, date_to = self._bounds(period)
         return await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=group_by,
             metrics=["sum", "count"],
@@ -554,7 +548,7 @@ class AnalyticsService:
         _, date_to = month_bounds(last_month, self.timezone)
         rows = await self.repo.aggregate(
             self.user_id,
-            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS, account_ids=self.account_ids),
+            self._filter(date_from, date_to),
             self.timezone,
             group_by=["category", "day"],
             metrics=["sum"],
@@ -590,6 +584,12 @@ class AnalyticsService:
                 self._history_start = datetime.fromtimestamp(first_time, ZoneInfo(self.timezone)).date()
             self._history_loaded = True
         return self._history_start
+
+    def _filter(self, date_from: int, date_to: int, **extra) -> TransactionFilter:
+        return TransactionFilter(
+            date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS,
+            account_ids=self.account_ids, place_ids=self.place_ids, cities=self.city_names, **extra,
+        )
 
     def _bounds(self, period: Period) -> tuple[int, int]:
         tz = ZoneInfo(self.timezone)

@@ -16,6 +16,10 @@ class Place(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    type_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    short_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    maps_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
 

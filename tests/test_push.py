@@ -31,25 +31,27 @@ async def test_expo_sends_silent_push_and_reports_unregistered():
             {"status": "error", "message": "gone", "details": {"error": "DeviceNotRegistered"}},
         ]})
 
-    unregistered = await ExpoPushClient(httpx.MockTransport(handler)).send_silent([GOOD, GONE], {"type": "location"})
-    assert unregistered == [GONE]
+    delivered, unregistered = await ExpoPushClient(httpx.MockTransport(handler)).send_silent(
+        [GOOD, GONE], {"type": "location"},
+    )
+    assert (delivered, unregistered) == (1, [GONE])
     assert sent[0] == {"to": GOOD, "data": {"type": "location"}, "priority": "high", "_contentAvailable": True}
 
 
 async def test_expo_failure_is_not_fatal():
     client = ExpoPushClient(httpx.MockTransport(lambda request: httpx.Response(500)))
-    assert await client.send_silent([GOOD], {}) == []
+    assert await client.send_silent([GOOD], {}) == (0, [])
 
 
 class FakeClient:
-    def __init__(self, unregistered):
-        self.unregistered = unregistered
+    def __init__(self, delivered, unregistered):
+        self.delivered, self.unregistered = delivered, unregistered
 
     async def send_silent(self, tokens, data):
-        return self.unregistered
+        return self.delivered, self.unregistered
 
 
-def push_service(tokens, unregistered=()):
+def push_service(tokens, unregistered=(), delivered=None):
     deleted, commits = [], []
 
     async def list_tokens(user_id):
@@ -61,7 +63,9 @@ def push_service(tokens, unregistered=()):
     async def commit():
         commits.append(1)
 
-    service = PushService(SimpleNamespace(commit=commit), FakeClient(list(unregistered)))
+    if delivered is None:
+        delivered = len(tokens) - len(unregistered)
+    service = PushService(SimpleNamespace(commit=commit), FakeClient(delivered, list(unregistered)))
     service.devices = SimpleNamespace(list_tokens=list_tokens, delete_tokens=delete_tokens)
     return service, deleted
 
@@ -77,3 +81,9 @@ async def test_push_service_without_devices():
     assert await service.send_silent(5, {}) is False
     service, _ = push_service([GONE], unregistered=[GONE])
     assert await service.send_silent(5, {}) is False
+
+
+async def test_push_failure_is_not_a_location_request():
+    service, deleted = push_service([GOOD], delivered=0)
+    assert await service.send_silent(5, {}) is False
+    assert deleted == []

@@ -10,12 +10,15 @@ NOW = 1_800_000_000
 
 def purchase(**overrides):
     values = {"id": 1, "user_id": 5, "source": "monobank", "amount": -8000, "mcc": 5814, "counter_iban": None,
-              "latitude": None, "time": NOW - 5}
+              "jar_id": None, "latitude": None, "time": NOW - 5}
     return SimpleNamespace(**{**values, **overrides})
 
 
 def test_needs_location_only_for_fresh_card_purchases():
     assert pipeline.needs_location(purchase(), NOW)
+    assert pipeline.needs_location(purchase(mcc=5818), NOW)
+    assert not pipeline.needs_location(purchase(mcc=4829), NOW)
+    assert not pipeline.needs_location(purchase(jar_id=3), NOW)
     assert not pipeline.needs_location(purchase(amount=5000), NOW)
     assert not pipeline.needs_location(purchase(mcc=None), NOW)
     assert not pipeline.needs_location(purchase(counter_iban="UA00"), NOW)
@@ -93,12 +96,18 @@ async def test_transfer_skips_location(monkeypatch):
     assert (calls["push"], calls["now"]) == ([], [1])
 
 
-async def test_mcc_without_search_skips_push(monkeypatch):
-    transaction = purchase(mcc=4829, place_method=None)
+async def test_online_purchase_asks_location_but_categorizes_now(monkeypatch):
+    transaction = purchase(mcc=5818, place_method=None)
     calls = patch_pipeline(monkeypatch, transaction, push_ok=True, searchable=False)
     await pipeline.process_new_transaction(1)
-    assert (calls["push"], calls["now"], calls["commits"]) == ([], [1], 1)
-    assert transaction.place_method == PlaceMethod.SKIPPED
+    assert (calls["push"], calls["now"], calls["later"]) == ([(5, {"type": "location_request", "transaction_id": 1})], [1], [])
+    assert (transaction.place_method, calls["commits"]) == (PlaceMethod.SKIPPED, 1)
+
+
+async def test_transfer_gets_no_push(monkeypatch):
+    calls = patch_pipeline(monkeypatch, purchase(mcc=4829), push_ok=True)
+    await pipeline.process_new_transaction(1)
+    assert (calls["push"], calls["now"]) == ([], [1])
 
 
 def place_transaction(method):
