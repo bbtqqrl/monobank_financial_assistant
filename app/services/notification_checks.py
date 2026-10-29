@@ -13,7 +13,14 @@ from app.repositories.notification import NotificationRepository
 from app.repositories.recurring_payment import RecurringPaymentRepository
 from app.schemas.analytics import WeekSummary
 from app.schemas.notification import NotificationType
-from app.services.analytics_service import MONTH_GENITIVE, ORDINALS, AnalyticsService
+from app.services.analytics_service import (
+    MONTH_GENITIVE,
+    MONTH_LOCATIVE,
+    ORDINALS,
+    AnalyticsService,
+    add_months,
+    month_key,
+)
 from app.services.llm.client import Completed, LLMClient
 from app.services.recurring_detection import SUBSCRIPTION
 from app.services.recurring_service import RecurringService
@@ -24,7 +31,9 @@ RECENT_DAYS = 7
 FIRST_SCAN_GAP = timedelta(hours=1)
 PACE_FIRST_DAY = 15
 PACE_LAST_DAY = 20
+INSIGHTS_LAST_DAY = 5
 USUAL_PACE_PCT = 5
+PRICE_INCREASE_MIN_RATIO = 1.05
 SUNDAY = 6
 SUMMARY_MAX_TOKENS = 1024
 SUMMARY_MAX_LENGTH = 300
@@ -93,7 +102,7 @@ async def subscription_price_increases(db: AsyncSession, user: User, now: dateti
         )
         for row in await _subscriptions(db, user, now)
         if row.previous_amount and row.price_changed_at and row.price_changed_at >= since
-        and row.amount > row.previous_amount
+        and row.amount >= PRICE_INCREASE_MIN_RATIO * row.previous_amount
     ]
 
 
@@ -206,6 +215,7 @@ async def weekly_summary(db: AsyncSession, user: User, now: datetime) -> list[No
     summary = await AnalyticsService(db, user.id, DEFAULT_TIMEZONE, today=now.date()).week_summary()
     if summary is None:
         return []
+    await db.commit()
     return [NotificationDraft(
         type=NotificationType.WEEKLY_SUMMARY,
         dedupe_key=key,
@@ -215,9 +225,38 @@ async def weekly_summary(db: AsyncSession, user: User, now: datetime) -> list[No
     )]
 
 
+def more_growing(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return f"Ще {count} категорія теж росте, деталі в застосунку."
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return f"Ще {count} категорії теж ростуть, деталі в застосунку."
+    return f"Ще {count} категорій теж ростуть, деталі в застосунку."
+
+
+async def monthly_insights(db: AsyncSession, user: User, now: datetime) -> list[NotificationDraft]:
+    if now.day > INSIGHTS_LAST_DAY:
+        return []
+    month = add_months(now.date().replace(day=1), -1)
+    result = await AnalyticsService(db, user.id, DEFAULT_TIMEZONE, today=now.date()).insights(month)
+    if not result.items:
+        return []
+    top = result.items[0]
+    body = f"У {MONTH_LOCATIVE[month.month - 1]} на «{top.category_name}» пішло {_uah(top.current)}, на {_uah(top.diff)} більше, ніж зазвичай."
+    if len(result.items) > 1:
+        body += f" {more_growing(len(result.items) - 1)}"
+    return [NotificationDraft(
+        type=NotificationType.INSIGHTS,
+        dedupe_key=f"insights:{month_key(month)}",
+        title=top.title,
+        body=body,
+        data={"month": month_key(month), "category_id": top.category_id},
+    )]
+
+
 CHECKS: dict[NotificationType, Check] = {
     NotificationType.SUBSCRIPTION_PRICE: subscription_price_increases,
     NotificationType.NEW_SUBSCRIPTION: new_subscriptions,
     NotificationType.MONTH_PACE: month_pace,
     NotificationType.WEEKLY_SUMMARY: weekly_summary,
+    NotificationType.INSIGHTS: monthly_insights,
 }

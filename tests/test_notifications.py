@@ -177,6 +177,7 @@ async def test_price_increase_only_recent_and_up(monkeypatch):
         subscription(2, "Netflix", 25000, currency=980, previous=32000, changed=recent),
         subscription(3, "Apple", 19900, currency=980, previous=14900, changed=old),
         subscription(4, "Claude", 2400),
+        subscription(5, "Google One", 10300, currency=980, previous=10000, changed=recent),
     ], NOW - timedelta(days=60))
     drafts = await subscription_price_increases(None, USER, NOW)
     assert [(d.dedupe_key, d.body) for d in drafts] == [
@@ -319,9 +320,62 @@ async def test_weekly_summary_only_on_sunday_and_once(monkeypatch):
     monkeypatch.setattr(notification_checks, "write_week_summary", fake_write)
     monkeypatch.setattr(NotificationRepository, "has_key", has_key)
 
-    assert await notification_checks.weekly_summary(None, USER, datetime(2026, 10, 31, 20, tzinfo=KYIV_TZ)) == []
-    [draft] = await notification_checks.weekly_summary(None, USER, NOW)
+    async def noop():
+        return None
+
+    db = SimpleNamespace(commit=noop)
+    assert await notification_checks.weekly_summary(db, USER, datetime(2026, 10, 31, 20, tzinfo=KYIV_TZ)) == []
+    [draft] = await notification_checks.weekly_summary(db, USER, NOW)
     assert (draft.dedupe_key, draft.body, draft.data) == ("weekly_summary:2026-44", "Текст.", {"week_start": "2026-10-26"})
     existing.add("weekly_summary:2026-44")
-    assert await notification_checks.weekly_summary(None, USER, NOW) == []
+    assert await notification_checks.weekly_summary(db, USER, NOW) == []
     assert len(calls) == 1
+
+
+def insight(category_id, name, current, diff, streak=3):
+    from app.schemas.analytics import Insight, InsightAction
+
+    return Insight(
+        type="category_growth_streak", category_id=category_id, category_name=name,
+        title=f"{name} зростає третій місяць поспіль", text="", streak_months=streak, current=current,
+        baseline=current - diff, diff=diff, action=InsightAction(type="open_transactions", category_id=category_id, month="2026-10"),
+    )
+
+
+async def test_monthly_insights_for_previous_month(monkeypatch):
+    from app.schemas.analytics import InsightsResponse
+    from app.services.analytics_service import AnalyticsService
+    from app.services.notification_checks import monthly_insights
+
+    asked = []
+    items = [insight(13, "Кафе та ресторани", 520000, 180000), insight(1, "Продукти", 900000, 50000)]
+
+    async def fake_insights(self, month):
+        asked.append(month)
+        return InsightsResponse(month="2026-10", items=items)
+
+    monkeypatch.setattr(AnalyticsService, "insights", fake_insights)
+    [draft] = await monthly_insights(None, USER, NOW)
+    assert asked == [NOW.date().replace(month=10)]
+    assert draft.title == "Кафе та ресторани зростає третій місяць поспіль"
+    assert draft.body == (
+        "У жовтні на «Кафе та ресторани» пішло 5 200 ₴, на 1 800 ₴ більше, ніж зазвичай. Ще 1 категорія теж росте, деталі в застосунку."
+    )
+    assert (draft.dedupe_key, draft.data) == ("insights:2026-10", {"month": "2026-10", "category_id": 13})
+
+    assert await monthly_insights(None, USER, datetime(2026, 11, 6, 20, tzinfo=KYIV_TZ)) == []
+    items.clear()
+    assert await monthly_insights(None, USER, NOW) == []
+
+
+async def test_insights_in_january_look_at_december(monkeypatch):
+    from app.schemas.analytics import InsightsResponse
+    from app.services.analytics_service import AnalyticsService
+    from app.services.notification_checks import monthly_insights
+
+    async def fake_insights(self, month):
+        return InsightsResponse(month="2026-12", items=[insight(1, "Продукти", 900000, 50000)])
+
+    monkeypatch.setattr(AnalyticsService, "insights", fake_insights)
+    [draft] = await monthly_insights(None, USER, datetime(2027, 1, 2, 20, tzinfo=KYIV_TZ))
+    assert draft.dedupe_key == "insights:2026-12" and draft.body.startswith("У грудні")
