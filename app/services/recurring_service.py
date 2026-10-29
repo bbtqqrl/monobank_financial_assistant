@@ -3,8 +3,11 @@ from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.currencies import alpha_code
 from app.db.models.recurring_payment import RecurringPayment
 from app.repositories.recurring_payment import RecurringPaymentRepository
+from app.schemas.recurring import RecurringPaymentItem, RecurringPaymentsResponse
+from app.schemas.transaction import CategoryBrief
 from app.services.errors import InvalidRequestError, NotFoundError
 from app.services.recurring_detection import (
     DAY_SECONDS,
@@ -13,6 +16,7 @@ from app.services.recurring_detection import (
     cluster_charges,
     detect_kind,
     is_whole_merchant,
+    monthly_amount,
     payment_state,
     similar,
     typical_amounts,
@@ -30,6 +34,39 @@ def _matches(row: RecurringPayment, cluster: Cluster) -> bool:
 def state(row: RecurringPayment, now: int) -> str:
     confirmed = row.user_kind is not None and row.cancelled_at is None
     return payment_state(row.last_charge_at, row.period_days, row.kind, now, confirmed)
+
+
+def payment_item(row: RecurringPayment, now: int) -> RecurringPaymentItem:
+    return RecurringPaymentItem(
+        id=row.id,
+        kind=row.kind,
+        name=row.name,
+        category=CategoryBrief.model_validate(row.category) if row.category is not None else None,
+        mcc=row.mcc,
+        currency=alpha_code(row.currency_code),
+        amount=row.amount,
+        amount_uah=row.amount_uah,
+        monthly_amount_uah=monthly_amount(row.amount_uah, row.period_days),
+        period_days=row.period_days,
+        first_charge_at=row.first_charge_at,
+        last_charge_at=row.last_charge_at,
+        next_charge_at=row.last_charge_at + row.period_days * DAY_SECONDS,
+        charges_count=row.charges_count,
+        state=state(row, now),
+        confirmed=row.user_kind is not None,
+        cancelled=row.cancelled_at is not None,
+    )
+
+
+def in_monthly_total(item: RecurringPaymentItem) -> bool:
+    return not item.cancelled and item.state != "inactive"
+
+
+def payments_summary(rows: list[RecurringPayment], now: int) -> RecurringPaymentsResponse:
+    items = [payment_item(row, now) for row in rows]
+    items.sort(key=lambda item: (item.state == "inactive", item.cancelled, -item.monthly_amount_uah))
+    total = sum(item.monthly_amount_uah for item in items if in_monthly_total(item))
+    return RecurringPaymentsResponse(monthly_total_uah=total, items=items)
 
 
 def _untouched(row: RecurringPayment) -> bool:
@@ -103,8 +140,8 @@ class RecurringService:
         await self.db.commit()
         return created
 
-    async def list(self, user_id: int, kind: str | None = None) -> list[RecurringPayment]:
-        now = int(time.time())
+    async def list(self, user_id: int, kind: str | None = None, now: int | None = None) -> list[RecurringPayment]:
+        now = now or int(time.time())
         await self.refresh(user_id, now)
         rows = await self.repo.list_for_user(user_id)
         return [

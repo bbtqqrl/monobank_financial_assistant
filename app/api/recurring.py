@@ -12,37 +12,12 @@ from app.schemas.recurring import (
     RecurringCharge,
     RecurringKind,
     RecurringPaymentDetail,
-    RecurringPaymentItem,
     RecurringPaymentsResponse,
     UpdateRecurringPaymentRequest,
 )
-from app.schemas.transaction import CategoryBrief
-from app.services.recurring_detection import DAY_SECONDS, monthly_amount
-from app.services.recurring_service import RecurringService, state
+from app.services.recurring_service import RecurringService, payment_item, payments_summary
 
 router = APIRouter(prefix="/recurring", tags=["Recurring payments"])
-
-
-def _item(row: RecurringPayment, now: int) -> dict:
-    return dict(
-        id=row.id,
-        kind=row.kind,
-        name=row.name,
-        category=CategoryBrief.model_validate(row.category) if row.category is not None else None,
-        mcc=row.mcc,
-        currency=alpha_code(row.currency_code),
-        amount=row.amount,
-        amount_uah=row.amount_uah,
-        monthly_amount_uah=monthly_amount(row.amount_uah, row.period_days),
-        period_days=row.period_days,
-        first_charge_at=row.first_charge_at,
-        last_charge_at=row.last_charge_at,
-        next_charge_at=row.last_charge_at + row.period_days * DAY_SECONDS,
-        charges_count=row.charges_count,
-        state=state(row, now),
-        confirmed=row.user_kind is not None,
-        cancelled=row.cancelled_at is not None,
-    )
 
 
 async def _detail(service: RecurringService, row: RecurringPayment) -> RecurringPaymentDetail:
@@ -57,7 +32,7 @@ async def _detail(service: RecurringService, row: RecurringPayment) -> Recurring
         )
         for transaction in await service.transactions(row.id)
     ]
-    return RecurringPaymentDetail(**_item(row, int(time.time())), charges=charges)
+    return RecurringPaymentDetail(**payment_item(row, int(time.time())).model_dump(), charges=charges)
 
 
 @router.get("", response_model=RecurringPaymentsResponse)
@@ -67,10 +42,7 @@ async def list_recurring(
     db: AsyncSession = Depends(get_db),
 ):
     now = int(time.time())
-    items = [RecurringPaymentItem(**_item(row, now)) for row in await RecurringService(db).list(current_user.id, kind)]
-    total = sum(item.monthly_amount_uah for item in items if not item.cancelled and item.state != "inactive")
-    items.sort(key=lambda item: (item.state == "inactive", item.cancelled, -item.monthly_amount_uah))
-    return RecurringPaymentsResponse(monthly_total_uah=total, items=items)
+    return payments_summary(await RecurringService(db).list(current_user.id, kind, now), now)
 
 
 # TODO: ручка, щоб юзер сам позначив транзакцію як підписку, не чекаючи другого списання

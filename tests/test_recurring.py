@@ -206,3 +206,31 @@ async def test_refresh_creates_links_and_keeps_user_decisions():
     repo.items = []
     await service(repo).refresh(5, NOW)
     assert by_name["Vodafone"] not in repo.rows
+
+
+async def test_assistant_tool_splits_totals_by_kind(monkeypatch):
+    from app.services.assistant import tools
+
+    def row(id, kind, name, amount, last, cancelled_at=None):
+        return SimpleNamespace(
+            id=id, kind=kind, name=name, category=None, mcc=None, currency_code=980, amount=amount, amount_uah=amount,
+            period_days=30, first_charge_at=ts(last), last_charge_at=ts(last), charges_count=3, user_kind=None,
+            cancelled_at=cancelled_at,
+        )
+
+    rows = [
+        row(1, SUBSCRIPTION, "Claude", 108000, "2026-10-22"),
+        row(2, SUBSCRIPTION, "Old", 5000, "2026-10-01", cancelled_at=ts("2026-10-05")),
+        row(3, REGULAR, "Vodafone", 26000, "2026-10-21"),
+    ]
+
+    async def fake_list(self, user_id, kind=None, now=None):
+        return [r for r in rows if kind is None or r.kind == kind]
+
+    monkeypatch.setattr(RecurringService, "list", fake_list)
+    ctx = tools.ToolContext(db=None, user_id=5, timezone="Europe/Kyiv")
+    result = await tools.get_recurring(ctx, tools.RecurringArgs())
+    assert (result["subscription_monthly"], result["regular_monthly"]) == (108000, 26000)
+    assert result["items"][0]["name"] == "Claude" and result["items"][0]["next_charge"] == "2026-11-21"
+    only_regular = await tools.get_recurring(ctx, tools.RecurringArgs(kind="regular"))
+    assert set(only_regular) == {"regular_monthly", "items"} and len(only_regular["items"]) == 1

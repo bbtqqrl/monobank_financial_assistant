@@ -158,23 +158,6 @@ class CategoryHistoryResponse(BaseModel):
     items: list[CategoryHistoryItem]
 
 
-class RecurringItem(BaseModel):
-    merchant_key: str
-    name: str
-    category: CategoryRef
-    months_seen: int
-    payment_count: int
-    typical_amount: int
-    monthly_amount: int
-    stable_amount: bool
-    last_date: date
-
-
-class RecurringResponse(BaseModel):
-    months: list[str]
-    items: list[RecurringItem]
-
-
 class CurrencyItem(BaseModel):
     currency: str
     transaction_count: int

@@ -44,6 +44,7 @@ from app.services.assistant.actions import (
 from app.services.budget_service import BudgetService
 from app.services.category_service import CategoryService
 from app.services.errors import ServiceError
+from app.services.recurring_service import RecurringService, in_monthly_total, payments_summary
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ CURRENCY_CODES = {alpha: numeric for numeric, alpha in ISO_ALPHA.items()}
 MONEY_KEYS = frozenset({
     "total", "total_uah", "expected", "amount", "amount_uah", "operation_amount", "current", "baseline", "diff",
     "average", "balance", "credit_limit", "goal", "current_amount", "median", "typical_amount", "monthly_amount",
-    "old_amount", "new_amount", "unlocated_amount",
+    "old_amount", "new_amount", "unlocated_amount", "subscription_monthly", "regular_monthly",
 })
 ACCOUNT_TYPE_NAMES = {
     "black": "Чорна картка",
@@ -173,9 +174,12 @@ class CategoryHistoryArgs(MonthlyArgs):
     category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії верхнього рівня. Без нього всі.")
 
 
-class RecurringArgs(MonthlyArgs):
-    category_ids: list[int] | None = Field(default=None, description="Тільки ці категорії; батьківська охоплює дочірні.")
-    limit: int = Field(default=20, ge=1, le=50)
+class RecurringArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["subscription", "regular"] | None = Field(
+        default=None, description="subscription - підписки, regular - регулярні платежі. Без нього обидва.",
+    )
 
 
 class CategoryTreeArgs(BaseModel):
@@ -375,9 +379,33 @@ async def get_category_history(ctx: ToolContext, args: CategoryHistoryArgs) -> d
 
 
 async def get_recurring(ctx: ToolContext, args: RecurringArgs) -> dict:
-    service = _analytics(ctx, args)
-    result = await service.recurring(_month(service, args.month), args.months, args.limit, args.category_ids)
-    return result.model_dump(mode="json")
+    now = int(datetime.now().timestamp())
+    result = payments_summary(await RecurringService(ctx.db).list(ctx.user_id, args.kind, now), now)
+    zone = ZoneInfo(ctx.timezone)
+    totals = {"subscription": 0, "regular": 0}
+    items = []
+    for item in result.items:
+        if in_monthly_total(item):
+            totals[item.kind] += item.monthly_amount_uah
+        items.append({
+            "id": item.id,
+            "kind": item.kind,
+            "name": item.name,
+            "category": item.category.name if item.category else None,
+            "amount": item.amount,
+            "currency": item.currency,
+            "amount_uah": item.amount_uah,
+            "monthly_amount": item.monthly_amount_uah,
+            "period_days": item.period_days,
+            "last_charge": datetime.fromtimestamp(item.last_charge_at, zone).date().isoformat(),
+            "next_charge": datetime.fromtimestamp(item.next_charge_at, zone).date().isoformat(),
+            "charges_count": item.charges_count,
+            "state": item.state,
+            "confirmed": item.confirmed,
+            "cancelled": item.cancelled,
+        })
+    monthly = {f"{kind}_monthly": total for kind, total in totals.items() if args.kind in (None, kind)}
+    return {**monthly, "items": items}
 
 
 async def get_currency_breakdown(ctx: ToolContext, args: PeriodArgs) -> dict:
@@ -658,10 +686,12 @@ READ_TOOLS = (
         name="get_recurring",
         label="Шукаю регулярні платежі",
         description=(
-            "Мерчанти й люди, яким платили щонайменше у двох різних місяцях з months: підписки, сервіси, перекази тим самим людям, "
-            "звичні магазини. months_seen - у скількох місяцях були платежі, typical_amount - медіана одного платежу, "
-            "monthly_amount - медіана суми за місяць, stable_amount - сума майже не змінюється (схоже на підписку). "
-            "Відсортовано за monthly_amount."
+            "Підписки й регулярні платежі людини, ті самі, що вона бачить на екрані. subscription - автоматичне щомісячне "
+            "списання сервісу (та сама сума раз на 28-35 днів); regular - те, що людина платить сама й систематично "
+            "(зв'язок, інтернет тощо). amount - сума одного списання у валюті currency, monthly_amount - у гривнях на місяць. "
+            "state: active - списується вчасно, missing - пропущено списання (можливо, скасована), inactive - давно не було. "
+            "confirmed - людина сама підтвердила, cancelled - позначила скасованою. subscription_monthly і regular_monthly - "
+            "суми на місяць без скасованих і неактивних. Перекази людям і звичайні магазини сюди не входять."
         ),
         args=RecurringArgs,
         handler=get_recurring,

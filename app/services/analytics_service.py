@@ -35,8 +35,6 @@ from app.schemas.analytics import (
     PeriodInfo,
     PlaceSpendItem,
     PlacesResponse,
-    RecurringItem,
-    RecurringResponse,
     SpendingResponse,
 )
 from app.core.currencies import alpha_code
@@ -51,9 +49,6 @@ MIN_GROWTH_STREAK = 2
 INSIGHT_WINDOW_MONTHS = 6
 MAX_INSIGHTS = 3
 EQUAL_TOLERANCE = 0.01
-MIN_RECURRING_MONTHS = 2
-STABLE_AMOUNT_SPREAD = 0.15
-STABLE_PAYMENTS_SHARE = 0.7
 
 MONTH_LOCATIVE = (
     "січні", "лютому", "березні", "квітні", "травні", "червні",
@@ -132,13 +127,6 @@ def share(amount: int, total: int) -> float:
 
 def format_uah(kopecks: int) -> str:
     return f"{round(kopecks / 100):,}".replace(",", " ") + " ₴"
-
-
-def is_stable(amounts: list[int], typical: int) -> bool:
-    if typical <= 0:
-        return False
-    close = sum(1 for amount in amounts if abs(amount - typical) <= typical * STABLE_AMOUNT_SPREAD)
-    return close / len(amounts) >= STABLE_PAYMENTS_SHARE
 
 
 def growth_streak(values: list[int]) -> int:
@@ -439,52 +427,6 @@ class AnalyticsService:
             ))
         items.sort(key=lambda item: (-item.median, -item.average, item.name))
         return CategoryHistoryResponse(month=month_key(month), months=totals, items=items)
-
-    async def recurring(
-        self, month: date, months: int, limit: int, category_ids: list[int] | None = None,
-    ) -> RecurringResponse:
-        window = [month_key(add_months(month, offset)) for offset in range(-(months - 1), 1)]
-        date_from, _ = month_bounds(parse_month(window[0]), self.timezone)
-        _, date_to = month_bounds(month, self.timezone)
-        transactions = await self.repo.list_transactions(
-            self.user_id,
-            self._filter(date_from, date_to, category_ids=category_ids),
-            self.timezone,
-        )
-
-        zone = ZoneInfo(self.timezone)
-        groups: dict[str, list[dict]] = defaultdict(list)
-        for transaction in transactions:
-            if transaction["amount_uah"] >= 0:
-                continue
-            key = build_merchant_key(transaction["description"]) or transaction["description"].strip().lower()
-            groups[key].append({**transaction, "day": datetime.fromtimestamp(transaction["time"], zone).date()})
-
-        items = []
-        for key, payments in groups.items():
-            by_month: dict[str, int] = defaultdict(int)
-            for payment in payments:
-                by_month[month_key(payment["day"])] -= payment["amount_uah"]
-            if len(by_month) < MIN_RECURRING_MONTHS:
-                continue
-            amounts = [-payment["amount_uah"] for payment in payments]
-            typical = round(statistics.median(amounts))
-            category_id, category_name, category_slug = Counter(
-                (payment["category_id"], payment["category_name"], payment["category_slug"]) for payment in payments
-            ).most_common(1)[0][0]
-            items.append(RecurringItem(
-                merchant_key=key,
-                name=Counter(payment["description"].strip() for payment in payments).most_common(1)[0][0],
-                category=CategoryRef(id=category_id, name=category_name, slug=category_slug),
-                months_seen=len(by_month),
-                payment_count=len(payments),
-                typical_amount=typical,
-                monthly_amount=round(statistics.median(by_month.values())),
-                stable_amount=is_stable(amounts, typical),
-                last_date=max(payment["day"] for payment in payments),
-            ))
-        items.sort(key=lambda item: (-item.monthly_amount, -item.months_seen, item.name))
-        return RecurringResponse(months=window, items=items[:limit])
 
     async def currencies(self, period: Period) -> CurrenciesResponse:
         date_from, date_to = self._bounds(period)
