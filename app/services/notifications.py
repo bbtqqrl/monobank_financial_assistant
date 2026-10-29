@@ -1,9 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
-from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,39 +10,19 @@ from app.db.models.user import User
 from app.db.session import SessionLocal
 from app.repositories.notification import NotificationRepository
 from app.repositories.user import UserRepository
+from app.schemas.notification import NotificationType
 from app.services.errors import NotFoundError
+from app.services.notification_checks import CHECKS, Check, NotificationDraft
 from app.services.push import PushService
 
 logger = logging.getLogger(__name__)
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 SEND_HOUR = 20
+LAST_SEND_HOUR = 21
 CHECK_INTERVAL_SECONDS = 5 * 60
 NOTIFICATION_PUSH = "notification"
-
-
-class NotificationType(StrEnum):
-    SUBSCRIPTION_PRICE = "subscription_price"
-    NEW_SUBSCRIPTION = "new_subscription"
-    MONTH_PACE = "month_pace"
-    WEEKLY_SUMMARY = "weekly_summary"
-    INSIGHTS = "insights"
-
-
 PRIORITY = list(NotificationType)
-
-
-@dataclass(frozen=True)
-class NotificationDraft:
-    type: NotificationType
-    dedupe_key: str
-    title: str
-    body: str
-    data: dict = field(default_factory=dict)
-
-
-Check = Callable[[AsyncSession, User, datetime], Awaitable[list[NotificationDraft]]]
-CHECKS: dict[NotificationType, Check] = {}
 
 
 def more_news(count: int) -> str:
@@ -67,16 +44,19 @@ class NotificationService:
         self.checks = CHECKS if checks is None else checks
 
     async def notify(self, user: User, now: datetime) -> Notification | None:
+        user_id = user.id
+        disabled = set(user.disabled_notifications)
         drafts: list[NotificationDraft] = []
         for kind, check in self.checks.items():
-            if kind in user.disabled_notifications:
+            if kind in disabled:
                 continue
             try:
-                async with self.db.begin_nested():
-                    drafts.extend(await check(self.db, user, now))
+                drafts.extend(await check(self.db, user, now))
             except Exception:
-                logger.exception("Notification check %s failed for user id=%s", kind, user.id)
-        created = await self.repo.add_new(user.id, [
+                logger.exception("Notification check %s failed for user id=%s", kind, user_id)
+                await self.db.rollback()
+                user = await self.db.get(User, user_id)
+        created = await self.repo.add_new(user_id, [
             {"type": d.type, "dedupe_key": d.dedupe_key, "title": d.title, "body": d.body, "data": d.data}
             for d in drafts
         ])
@@ -84,13 +64,13 @@ class NotificationService:
         if not created:
             return None
         start_of_day = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
-        if await self.repo.pushed_since(user.id, start_of_day):
+        if await self.repo.pushed_since(user_id, start_of_day):
             return None
         created.sort(key=lambda notification: PRIORITY.index(notification.type))
         top = created[0]
         body = top.body if len(created) == 1 else f"{top.body} {more_news(len(created) - 1)}"
         data = {"type": NOTIFICATION_PUSH, "notification_id": top.id, "kind": top.type, **top.data}
-        if await self.push.send_visible(user.id, top.title, body, data):
+        if await self.push.send_visible(user_id, top.title, body, data):
             top.pushed_at = datetime.now(timezone.utc)
             await self.db.commit()
             return top
@@ -132,7 +112,7 @@ async def run_notifier_forever() -> None:
     last_run: date | None = None
     while True:
         now = datetime.now(KYIV_TZ)
-        if now.hour == SEND_HOUR and last_run != now.date():
+        if SEND_HOUR <= now.hour <= LAST_SEND_HOUR and last_run != now.date():
             last_run = now.date()
             try:
                 await send_evening_notifications(now)

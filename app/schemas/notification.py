@@ -1,8 +1,15 @@
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
-from app.services.notifications import NotificationType
+
+class NotificationType(StrEnum):
+    SUBSCRIPTION_PRICE = "subscription_price"
+    NEW_SUBSCRIPTION = "new_subscription"
+    MONTH_PACE = "month_pace"
+    WEEKLY_SUMMARY = "weekly_summary"
+    INSIGHTS = "insights"
 
 
 class NotificationItem(BaseModel):

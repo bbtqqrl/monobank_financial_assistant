@@ -234,3 +234,17 @@ async def test_assistant_tool_splits_totals_by_kind(monkeypatch):
     assert result["items"][0]["name"] == "Claude" and result["items"][0]["next_charge"] == "2026-11-21"
     only_regular = await tools.get_recurring(ctx, tools.RecurringArgs(kind="regular"))
     assert set(only_regular) == {"regular_monthly", "items"} and len(only_regular["items"]) == 1
+
+
+async def test_refresh_remembers_subscription_price_change():
+    netflix = charges("Netflix", [("2026-08-05", 25000), ("2026-09-05", 25000)], 4899, SUBS)
+    repo = FakeRepo(netflix)
+    [row] = await service(repo).refresh(5, NOW)
+    assert (row.amount, row.previous_amount) == (25000, None)
+
+    repo.items = netflix + charges("Netflix", [("2026-10-05", 32000)], 4899, SUBS)
+    await service(repo).refresh(5, NOW)
+    assert (row.amount, row.previous_amount, row.price_changed_at) == (32000, 25000, ts("2026-10-05"))
+
+    await service(repo).refresh(5, NOW)
+    assert (row.previous_amount, row.price_changed_at) == (25000, ts("2026-10-05"))

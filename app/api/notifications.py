@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.notification import NotificationItem, NotificationSettings, NotificationsResponse
-from app.services.notifications import NotificationService, NotificationType
+from app.schemas.notification import NotificationItem, NotificationSettings, NotificationsResponse, NotificationType
+from app.services.notifications import NotificationService
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 

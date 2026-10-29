@@ -37,9 +37,18 @@ ISO_ALPHA = {
     944: "AZN",
 }
 
+CURRENCY_SIGNS = {"UAH": "₴", "USD": "$", "EUR": "€", "GBP": "£", "PLN": "zł"}
+
 
 def alpha_code(numeric: int) -> str:
     return ISO_ALPHA.get(numeric, str(numeric))
+
+
+def format_money(minor: int, currency: int) -> str:
+    value = abs(minor) / 100
+    text = f"{value:,.0f}" if minor % 100 == 0 else f"{value:,.2f}"
+    code = alpha_code(currency)
+    return text.replace(",", " ").replace(".", ",") + " " + CURRENCY_SIGNS.get(code, code)
 
 
 def known_amount_uah(amount: int, operation_amount: int | None, currency: int, operation_currency: int) -> int | None:

@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -49,11 +48,10 @@ def service(checks, repo=None, push=None):
     async def noop():
         return None
 
-    @asynccontextmanager
-    async def begin_nested():
-        yield
+    async def get(model, user_id):
+        return USER
 
-    db = SimpleNamespace(commit=noop, begin_nested=begin_nested)
+    db = SimpleNamespace(commit=noop, rollback=noop, get=get)
     result = NotificationService(db, push=push or FakePush(), checks=checks)
     result.repo = repo or FakeRepo()
     return result
@@ -129,3 +127,68 @@ def test_more_news_plural():
         "І ще 1 новина в застосунку.", "І ще 2 новини в застосунку.", "І ще 5 новин в застосунку.",
         "І ще 11 новин в застосунку.", "І ще 21 новина в застосунку.", "І ще 22 новини в застосунку.",
     ]
+
+
+def subscription(id, name, amount, currency=840, previous=None, changed=None, created=NOW, cancelled_at=None):
+    return SimpleNamespace(id=id, name=name, amount=amount, currency_code=currency, previous_amount=previous,
+                           price_changed_at=changed, created_at=created, cancelled_at=cancelled_at)
+
+
+def patch_subscriptions(monkeypatch, rows, first_scan):
+    from app.repositories.recurring_payment import RecurringPaymentRepository
+    from app.services.recurring_service import RecurringService
+
+    async def fake_list(self, user_id, kind=None, now=None):
+        assert kind == "subscription"
+        return rows
+
+    async def fake_first(self, user_id):
+        return first_scan
+
+    monkeypatch.setattr(RecurringService, "list", fake_list)
+    monkeypatch.setattr(RecurringPaymentRepository, "first_created_at", fake_first)
+
+
+async def test_new_subscription_skips_first_scan_old_and_cancelled(monkeypatch):
+    from datetime import timedelta
+    from app.services.notification_checks import new_subscriptions
+
+    first = NOW - timedelta(days=30)
+    patch_subscriptions(monkeypatch, [
+        subscription(1, "Claude", 2400, created=NOW - timedelta(hours=3)),
+        subscription(2, "Friendly Share", 12900, currency=980, created=first),
+        subscription(3, "Old", 999, created=NOW - timedelta(days=10)),
+        subscription(4, "Cancelled", 999, created=NOW - timedelta(hours=3), cancelled_at=1),
+    ], first)
+    drafts = await new_subscriptions(None, USER, NOW)
+    assert [(d.dedupe_key, d.body, d.data) for d in drafts] == [
+        ("new_subscription:1", "Claude: 24 $ щомісяця. Додали її до твоїх підписок.", {"recurring_id": 1}),
+    ]
+
+
+async def test_price_increase_only_recent_and_up(monkeypatch):
+    from datetime import timedelta
+    from app.services.notification_checks import subscription_price_increases
+
+    recent = int((NOW - timedelta(days=2)).timestamp())
+    old = int((NOW - timedelta(days=20)).timestamp())
+    patch_subscriptions(monkeypatch, [
+        subscription(1, "Spotify", 599, previous=499, changed=recent),
+        subscription(2, "Netflix", 25000, currency=980, previous=32000, changed=recent),
+        subscription(3, "Apple", 19900, currency=980, previous=14900, changed=old),
+        subscription(4, "Claude", 2400),
+    ], NOW - timedelta(days=60))
+    drafts = await subscription_price_increases(None, USER, NOW)
+    assert [(d.dedupe_key, d.body) for d in drafts] == [
+        (f"subscription_price:1:{recent}", "Spotify: було 4,99 $, тепер 5,99 $ (+20%)."),
+    ]
+
+
+def test_format_money():
+    from app.core.currencies import format_money
+
+    assert format_money(12900, 980) == "129 ₴"
+    assert format_money(-123456, 980) == "1 234,56 ₴"
+    assert format_money(499, 840) == "4,99 $"
+    assert format_money(1000, 985) == "10 zł"
+    assert format_money(1000, 203) == "10 CZK"
