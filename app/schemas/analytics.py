@@ -123,6 +123,28 @@ class MonthPace(BaseModel):
     top_category_diff: int
 
 
+class WeekCategory(BaseModel):
+    name: str
+    spent: int
+    usual: int | None
+
+
+class WeekPurchase(BaseModel):
+    description: str
+    amount: int
+    category: str
+
+
+class WeekSummary(BaseModel):
+    week_start: date
+    week_end: date
+    spent: int
+    usual: int | None
+    count: int
+    categories: list[WeekCategory]
+    biggest: WeekPurchase | None
+
+
 class InsightAction(BaseModel):
     type: Literal["open_transactions"]
     category_id: int

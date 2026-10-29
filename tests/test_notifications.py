@@ -237,3 +237,91 @@ async def test_month_pace_only_mid_month_and_with_history(monkeypatch):
     assert len(await month_pace(None, USER, datetime(2026, 11, 18, 20, tzinfo=KYIV_TZ))) == 1
     patch_pace(monkeypatch, None)
     assert await month_pace(None, USER, datetime(2026, 11, 15, 20, tzinfo=KYIV_TZ)) == []
+
+
+def week(usual=500000, categories=True, biggest=True):
+    from datetime import date
+    from app.schemas.analytics import WeekCategory, WeekPurchase, WeekSummary
+
+    return WeekSummary(
+        week_start=date(2026, 10, 26), week_end=date(2026, 11, 1), spent=420037, usual=usual, count=34,
+        categories=[WeekCategory(name="Продукти", spent=150000, usual=120000 if usual else None)] if categories else [],
+        biggest=WeekPurchase(description="Rozetka", amount=180000, category="Техніка та електроніка") if biggest else None,
+    )
+
+
+def test_week_facts_have_ready_numbers():
+    from app.services.notification_checks import week_facts
+
+    assert week_facts(week()) == (
+        "Тиждень: 26 жовтня – 1 листопада\n"
+        "Витрачено: 4 200 ₴, покупок: 34\n"
+        "Звичайний тиждень: 5 000 ₴, різниця -16%\n"
+        "Категорія «Продукти»: 1 500 ₴, зазвичай 1 200 ₴ на тиждень\n"
+        "Найбільша покупка: Rozetka — 1 800 ₴ («Техніка та електроніка»)"
+    )
+    assert "історії для порівняння ще мало" in week_facts(week(usual=None, categories=False, biggest=False))
+    rare = week()
+    rare.categories[0].usual = 3500
+    assert "Категорія «Продукти»: 1 500 ₴, зазвичай на це майже не витрачається" in week_facts(rare)
+
+
+class FakeLLM:
+
+    def __init__(self, text=None, error=None):
+        self.text, self.error = text, error
+        self.calls = []
+
+    async def stream(self, **kwargs):
+        from app.services.llm.client import Completed
+
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        yield Completed(SimpleNamespace(content=[SimpleNamespace(type="thinking"), SimpleNamespace(type="text", text=self.text)]))
+
+
+async def test_week_summary_uses_llm_text_or_falls_back():
+    from app.services.notification_checks import write_week_summary
+
+    llm = FakeLLM(" За тиждень пішло 4 200 ₴ — на 16% менше, ніж зазвичай. ")
+    assert await write_week_summary(week(), 5, llm) == "За тиждень пішло 4 200 ₴ — на 16% менше, ніж зазвичай."
+    assert llm.calls[0]["purpose"] == "weekly_summary" and llm.calls[0]["user_id"] == 5
+
+    fallback = "За тиждень витрачено 4 200 ₴, на 16% менше, ніж зазвичай. Найбільше пішло на «Продукти»: 1 500 ₴."
+    assert await write_week_summary(week(), 5, FakeLLM(error=RuntimeError("down"))) == fallback
+    assert await write_week_summary(week(), 5, FakeLLM("x" * 301)) == fallback
+    assert await write_week_summary(week(usual=None), 5, FakeLLM("")) == (
+        "За тиждень витрачено 4 200 ₴. Найбільше пішло на «Продукти»: 1 500 ₴."
+    )
+
+
+async def test_weekly_summary_only_on_sunday_and_once(monkeypatch):
+    from app.repositories.notification import NotificationRepository
+    from app.services import notification_checks
+    from app.services.analytics_service import AnalyticsService
+
+    calls = []
+
+    async def fake_summary(self):
+        calls.append(self.today)
+        return week()
+
+    async def fake_write(summary, user_id, llm=None):
+        return "Текст."
+
+    existing = set()
+
+    async def has_key(self, user_id, key):
+        return key in existing
+
+    monkeypatch.setattr(AnalyticsService, "week_summary", fake_summary)
+    monkeypatch.setattr(notification_checks, "write_week_summary", fake_write)
+    monkeypatch.setattr(NotificationRepository, "has_key", has_key)
+
+    assert await notification_checks.weekly_summary(None, USER, datetime(2026, 10, 31, 20, tzinfo=KYIV_TZ)) == []
+    [draft] = await notification_checks.weekly_summary(None, USER, NOW)
+    assert (draft.dedupe_key, draft.body, draft.data) == ("weekly_summary:2026-44", "Текст.", {"week_start": "2026-10-26"})
+    existing.add("weekly_summary:2026-44")
+    assert await notification_checks.weekly_summary(None, USER, NOW) == []
+    assert len(calls) == 1

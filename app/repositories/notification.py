@@ -30,6 +30,12 @@ class NotificationRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def has_key(self, user_id: int, dedupe_key: str) -> bool:
+        result = await self.db.execute(
+            select(Notification.id).where(Notification.user_id == user_id, Notification.dedupe_key == dedupe_key)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def list_for_user(self, user_id: int, limit: int, offset: int) -> list[Notification]:
         result = await self.db.execute(
             select(Notification)

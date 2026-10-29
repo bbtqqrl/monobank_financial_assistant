@@ -31,6 +31,9 @@ from app.schemas.analytics import (
     MerchantsResponse,
     MonthlyResponse,
     MonthPace,
+    WeekCategory,
+    WeekPurchase,
+    WeekSummary,
     MonthTotal,
     OtherShare,
     PeriodInfo,
@@ -51,6 +54,9 @@ INSIGHT_WINDOW_MONTHS = 6
 MAX_INSIGHTS = 3
 PACE_HISTORY_MONTHS = 12
 MIN_PACE_MONTHS = 3
+SUMMARY_HISTORY_WEEKS = 8
+MIN_SUMMARY_WEEKS = 4
+SUMMARY_TOP_CATEGORIES = 3
 EQUAL_TOLERANCE = 0.01
 
 MONTH_LOCATIVE = (
@@ -388,6 +394,61 @@ class AnalyticsService:
             months_used=len(complete),
             top_category=top_category if top_diff > 0 else None,
             top_category_diff=max(top_diff, 0),
+        )
+
+    async def week_summary(self) -> WeekSummary | None:
+        week_start = self.today - timedelta(days=self.today.weekday())
+        weeks = [week_start - timedelta(weeks=offset) for offset in range(SUMMARY_HISTORY_WEEKS, 0, -1)]
+        date_from, date_to = self._bounds(Period(weeks[0], self.today))
+        rows = await self.repo.aggregate(
+            self.user_id, self._filter(date_from, date_to), self.timezone,
+            group_by=["week", "category"], metrics=["sum", "count"],
+        )
+        spent: dict[tuple[str, int], int] = defaultdict(int)
+        names: dict[int, str] = {}
+        current = week_start.isoformat()
+        count = 0
+        for row in rows:
+            spent[(row["week"], row["category_id"])] -= row["sum"]
+            names[row["category_id"]] = row["category_name"]
+            if row["week"] == current:
+                count += row["count"]
+        total = max(sum(amount for (week, _), amount in spent.items() if week == current), 0)
+        if total <= 0:
+            return None
+
+        history_start = await self._get_history_start()
+        full = [week.isoformat() for week in weeks if history_start is not None and week >= history_start]
+        known = len(full) >= MIN_SUMMARY_WEEKS
+
+        def usual(category_id: int | None = None) -> int | None:
+            if not known:
+                return None
+            return round(statistics.median(
+                max(sum(amount for (w, c), amount in spent.items() if w == week and category_id in (None, c)), 0)
+                for week in full
+            ))
+
+        top = sorted(
+            ((amount, category_id) for (week, category_id), amount in spent.items() if week == current and amount > 0),
+            reverse=True,
+        )[:SUMMARY_TOP_CATEGORIES]
+        week_from, week_to = self._bounds(Period(week_start, self.today))
+        purchases = await self.repo.list_transactions(self.user_id, self._filter(week_from, week_to), self.timezone)
+        biggest = min(purchases, key=lambda item: item["amount_uah"], default=None)
+        return WeekSummary(
+            week_start=week_start,
+            week_end=self.today,
+            spent=total,
+            usual=usual(),
+            count=count,
+            categories=[
+                WeekCategory(name=names[category_id], spent=amount, usual=usual(category_id))
+                for amount, category_id in top
+            ],
+            biggest=WeekPurchase(
+                description=biggest["description"], amount=-biggest["amount_uah"], category=biggest["category_name"],
+            ) if biggest is not None and biggest["amount_uah"] < 0 else None,
         )
 
     async def insights(self, month: date) -> InsightsResponse:
