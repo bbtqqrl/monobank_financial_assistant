@@ -248,3 +248,10 @@ async def test_refresh_remembers_subscription_price_change():
 
     await service(repo).refresh(5, NOW)
     assert (row.previous_amount, row.price_changed_at) == (25000, ts("2026-10-05"))
+
+
+def test_second_apple_subscription_is_not_a_price_change():
+    icloud = charges("Apple", [("2026-08-03", 4900), ("2026-09-03", 4900), ("2026-10-03", 4900)], 5818, SUBS)
+    music = charges("Apple", [("2026-10-01", 19900), ("2026-11-01", 19900)], 5818, SUBS)
+    clusters = sorted(cluster_charges(icloud + music), key=lambda c: c.last.amount)
+    assert [[c.amount for c in cluster.charges] for cluster in clusters] == [[4900, 4900, 4900], [19900, 19900]]

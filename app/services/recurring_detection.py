@@ -22,6 +22,7 @@ SUBSCRIPTION_MAX_GAP_DAYS = 35
 SIMILAR_SHARE = 0.7
 MAX_CHARGES_PER_MONTH = 2
 PRICE_CHANGE_WINDOW_DAYS = 5
+PRICE_CHANGE_MAX_RATIO = 1.5
 DEFAULT_PERIOD_DAYS = 30
 MAX_REGULAR_PERIOD_DAYS = 70
 DAYS_PER_MONTH = 30.4
@@ -91,6 +92,7 @@ def _price_change(clusters: list[Cluster], charge: Charge) -> Cluster | None:
     deviations = [
         (abs((charge.time - cluster.last.time) / DAY_SECONDS - cluster.period_days), cluster)
         for cluster in clusters
+        if max(charge.amount, cluster.last.amount) <= PRICE_CHANGE_MAX_RATIO * min(charge.amount, cluster.last.amount)
     ]
     deviations = [(deviation, cluster) for deviation, cluster in deviations if deviation <= PRICE_CHANGE_WINDOW_DAYS]
     return min(deviations, key=lambda item: item[0])[1] if deviations else None

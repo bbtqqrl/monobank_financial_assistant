@@ -30,6 +30,10 @@ from app.schemas.analytics import (
     MerchantItem,
     MerchantsResponse,
     MonthlyResponse,
+    MonthPace,
+    WeekCategory,
+    WeekPurchase,
+    WeekSummary,
     MonthTotal,
     OtherShare,
     PeriodInfo,
@@ -48,11 +52,20 @@ MIN_CHANGE_AMOUNT = 20_000
 MIN_GROWTH_STREAK = 2
 INSIGHT_WINDOW_MONTHS = 6
 MAX_INSIGHTS = 3
+PACE_HISTORY_MONTHS = 12
+MIN_PACE_MONTHS = 3
+SUMMARY_HISTORY_WEEKS = 8
+MIN_SUMMARY_WEEKS = 4
+SUMMARY_TOP_CATEGORIES = 3
 EQUAL_TOLERANCE = 0.01
 
 MONTH_LOCATIVE = (
     "січні", "лютому", "березні", "квітні", "травні", "червні",
     "липні", "серпні", "вересні", "жовтні", "листопаді", "грудні",
+)
+MONTH_GENITIVE = (
+    "січня", "лютого", "березня", "квітня", "травня", "червня",
+    "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
 )
 ORDINALS = {
     2: "другий", 3: "третій", 4: "четвертий", 5: "п'ятий", 6: "шостий", 7: "сьомий",
@@ -190,7 +203,7 @@ class AnalyticsService:
 
     def __init__(
         self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None,
-        place_ids: list[int] | None = None, cities: list[str] | None = None,
+        place_ids: list[int] | None = None, cities: list[str] | None = None, today: date | None = None,
     ):
         self.repo = AnalyticsRepository(db)
         self.user_id = user_id
@@ -198,7 +211,7 @@ class AnalyticsService:
         self.account_ids = account_ids
         self.place_ids = place_ids
         self.city_names = cities
-        self.today = datetime.now(ZoneInfo(timezone)).date()
+        self.today = today or datetime.now(ZoneInfo(timezone)).date()
         self.current_month = self.today.replace(day=1)
         self._history_start: date | None = None
         self._history_loaded = False
@@ -357,6 +370,85 @@ class AnalyticsService:
             months=monthly,
             average=average,
             selected_vs_average=selected_vs_average,
+        )
+
+    async def month_pace(self) -> MonthPace | None:
+        month = self.current_month
+        day = self.today.day
+        window = [add_months(month, offset) for offset in range(-PACE_HISTORY_MONTHS, 1)]
+        rows = await self._day_rows(window[0], month)
+        complete = [item.month for item in await self._month_totals(window, rows) if item.complete]
+        if len(complete) < MIN_PACE_MONTHS:
+            return None
+        current = month_key(month)
+        grown = []
+        for category in {row.category.id: row.category for row in rows if row.month == current}.values():
+            usual = statistics.median(self._sum(rows, m, category.id, upto_day=day) for m in complete)
+            grown.append((self._sum(rows, current, category.id, upto_day=day) - round(usual), category))
+        top_diff, top_category = max(grown, key=lambda item: item[0], default=(0, None))
+        return MonthPace(
+            month=current,
+            day=day,
+            spent=self._sum(rows, current, upto_day=day),
+            usual=round(statistics.median(self._sum(rows, m, upto_day=day) for m in complete)),
+            months_used=len(complete),
+            top_category=top_category if top_diff > 0 else None,
+            top_category_diff=max(top_diff, 0),
+        )
+
+    async def week_summary(self) -> WeekSummary | None:
+        week_start = self.today - timedelta(days=self.today.weekday())
+        weeks = [week_start - timedelta(weeks=offset) for offset in range(SUMMARY_HISTORY_WEEKS, 0, -1)]
+        date_from, date_to = self._bounds(Period(weeks[0], self.today))
+        rows = await self.repo.aggregate(
+            self.user_id, self._filter(date_from, date_to), self.timezone,
+            group_by=["week", "category"], metrics=["sum", "count"],
+        )
+        spent: dict[tuple[str, int], int] = defaultdict(int)
+        names: dict[int, str] = {}
+        current = week_start.isoformat()
+        count = 0
+        for row in rows:
+            spent[(row["week"], row["category_id"])] -= row["sum"]
+            names[row["category_id"]] = row["category_name"]
+            if row["week"] == current:
+                count += row["count"]
+        total = max(sum(amount for (week, _), amount in spent.items() if week == current), 0)
+        if total <= 0:
+            return None
+
+        history_start = await self._get_history_start()
+        full = [week.isoformat() for week in weeks if history_start is not None and week >= history_start]
+        known = len(full) >= MIN_SUMMARY_WEEKS
+
+        def usual(category_id: int | None = None) -> int | None:
+            if not known:
+                return None
+            return round(statistics.median(
+                max(sum(amount for (w, c), amount in spent.items() if w == week and category_id in (None, c)), 0)
+                for week in full
+            ))
+
+        top = sorted(
+            ((amount, category_id) for (week, category_id), amount in spent.items() if week == current and amount > 0),
+            reverse=True,
+        )[:SUMMARY_TOP_CATEGORIES]
+        week_from, week_to = self._bounds(Period(week_start, self.today))
+        purchases = await self.repo.list_transactions(self.user_id, self._filter(week_from, week_to), self.timezone)
+        biggest = min(purchases, key=lambda item: item["amount_uah"], default=None)
+        return WeekSummary(
+            week_start=week_start,
+            week_end=self.today,
+            spent=total,
+            usual=usual(),
+            count=count,
+            categories=[
+                WeekCategory(name=names[category_id], spent=amount, usual=usual(category_id))
+                for amount, category_id in top
+            ],
+            biggest=WeekPurchase(
+                description=biggest["description"], amount=-biggest["amount_uah"], category=biggest["category_name"],
+            ) if biggest is not None and biggest["amount_uah"] < 0 else None,
         )
 
     async def insights(self, month: date) -> InsightsResponse:
