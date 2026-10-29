@@ -32,6 +32,7 @@ from app.api.budgets import router as budgets_router
 from app.api.categories import router as categories_router
 from app.api.devices import router as devices_router
 from app.api.merchant_mappings import router as merchant_mappings_router
+from app.api.notifications import router as notifications_router
 from app.api.places import router as places_router
 from app.api.recurring import router as recurring_router
 from app.api.transactions import router as transactions_router
@@ -39,17 +40,20 @@ from app.api.user_connect import router as monobank_router
 from app.api.webhook import router as webhook_router
 from app.services.errors import ServiceError
 from app.services.categorization_sweeper import run_sweeper_forever
+from app.services.notifications import run_notifier_forever
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    sweeper = asyncio.create_task(run_sweeper_forever())
+    tasks = [asyncio.create_task(run_sweeper_forever()), asyncio.create_task(run_notifier_forever())]
     yield
-    sweeper.cancel()
-    with suppress(asyncio.CancelledError):
-        await sweeper
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(lifespan=lifespan)
@@ -81,6 +85,7 @@ app.include_router(analytics_router)
 app.include_router(assistant_router)
 app.include_router(places_router)
 app.include_router(recurring_router)
+app.include_router(notifications_router)
 app.include_router(devices_router)
 
 
