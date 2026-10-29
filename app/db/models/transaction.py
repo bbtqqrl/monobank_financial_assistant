@@ -73,6 +73,11 @@ class TransactionRaw(Base):
         ForeignKey("places.id", ondelete="SET NULL"),
         nullable=True,
     )
+    recurring_payment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_payments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     time: Mapped[int] = mapped_column(BigInteger, index=True)
     description: Mapped[str] = mapped_column(Text)
