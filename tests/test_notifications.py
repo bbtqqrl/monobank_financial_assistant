@@ -131,7 +131,7 @@ def test_more_news_plural():
 
 def subscription(id, name, amount, currency=840, previous=None, changed=None, created=NOW, cancelled_at=None):
     return SimpleNamespace(id=id, name=name, amount=amount, currency_code=currency, previous_amount=previous,
-                           price_changed_at=changed, created_at=created, cancelled_at=cancelled_at)
+                           price_changed_at=changed, created_at=created, cancelled_at=cancelled_at, charges_count=2)
 
 
 def patch_subscriptions(monkeypatch, rows, first_scan):
@@ -162,7 +162,7 @@ async def test_new_subscription_skips_first_scan_old_and_cancelled(monkeypatch):
     ], first)
     drafts = await new_subscriptions(None, USER, NOW)
     assert [(d.dedupe_key, d.body, d.data) for d in drafts] == [
-        ("new_subscription:1", "Claude: 24 $ щомісяця. Додали її до твоїх підписок.", {"recurring_id": 1}),
+        ("new_subscription:1", "Claude: 24 $ щомісяця, списується вже другий місяць. Додали до твоїх підписок.", {"recurring_id": 1}),
     ]
 
 
@@ -192,3 +192,48 @@ def test_format_money():
     assert format_money(499, 840) == "4,99 $"
     assert format_money(1000, 985) == "10 zł"
     assert format_money(1000, 203) == "10 CZK"
+
+
+def patch_pace(monkeypatch, pace):
+    from app.services.analytics_service import AnalyticsService
+
+    async def fake_pace(self):
+        return pace
+
+    monkeypatch.setattr(AnalyticsService, "month_pace", fake_pace)
+
+
+def pace(spent, usual, top=None, diff=0):
+    from app.schemas.analytics import CategoryRef, MonthPace
+
+    category = CategoryRef(id=13, name=top, slug="kafe") if top else None
+    return MonthPace(month="2026-11", day=15, spent=spent, usual=usual, months_used=6, top_category=category,
+                     top_category_diff=diff)
+
+
+async def test_month_pace_texts(monkeypatch):
+    from app.services.notification_checks import month_pace
+
+    on_15th = datetime(2026, 11, 15, 20, 5, tzinfo=KYIV_TZ)
+    cases = [
+        (pace(880000, 1000000), "Ти молодець: з 1 по 15 листопада витрачено 8 800 ₴, це на 12% менше, ніж зазвичай."),
+        (pace(1030000, 1000000), "З 1 по 15 листопада витрачено 10 300 ₴. Йдеш у звичному темпі."),
+        (pace(1180000, 1000000, "Кафе та ресторани", 120000),
+         "З 1 по 15 листопада витрачено 11 800 ₴, це на 18% більше, ніж зазвичай. "
+         "Найбільше зросла категорія «Кафе та ресторани»: +1 200 ₴."),
+    ]
+    for result, body in cases:
+        patch_pace(monkeypatch, result)
+        [notification] = await month_pace(None, USER, on_15th)
+        assert notification.body == body and notification.dedupe_key == "month_pace:2026-11"
+
+
+async def test_month_pace_only_mid_month_and_with_history(monkeypatch):
+    from app.services.notification_checks import month_pace
+
+    patch_pace(monkeypatch, pace(1000, 1000))
+    assert await month_pace(None, USER, datetime(2026, 11, 14, 20, tzinfo=KYIV_TZ)) == []
+    assert await month_pace(None, USER, datetime(2026, 11, 21, 20, tzinfo=KYIV_TZ)) == []
+    assert len(await month_pace(None, USER, datetime(2026, 11, 18, 20, tzinfo=KYIV_TZ))) == 1
+    patch_pace(monkeypatch, None)
+    assert await month_pace(None, USER, datetime(2026, 11, 15, 20, tzinfo=KYIV_TZ)) == []

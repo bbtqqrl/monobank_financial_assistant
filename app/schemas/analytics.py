@@ -113,6 +113,16 @@ class MonthlyResponse(BaseModel):
     selected_vs_average: Literal["below", "above", "equal"] | None
 
 
+class MonthPace(BaseModel):
+    month: str
+    day: int
+    spent: int
+    usual: int
+    months_used: int
+    top_category: CategoryRef | None
+    top_category_diff: int
+
+
 class InsightAction(BaseModel):
     type: Literal["open_transactions"]
     category_id: int

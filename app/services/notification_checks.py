@@ -4,16 +4,21 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.currencies import format_money
+from app.core.currencies import UAH, format_money
 from app.db.models.recurring_payment import RecurringPayment
 from app.db.models.user import User
 from app.repositories.recurring_payment import RecurringPaymentRepository
+from app.repositories.analytics import DEFAULT_TIMEZONE
 from app.schemas.notification import NotificationType
+from app.services.analytics_service import MONTH_GENITIVE, ORDINALS, AnalyticsService
 from app.services.recurring_detection import SUBSCRIPTION
 from app.services.recurring_service import RecurringService
 
 RECENT_DAYS = 7
 FIRST_SCAN_GAP = timedelta(hours=1)
+PACE_FIRST_DAY = 15
+PACE_LAST_DAY = 20
+USUAL_PACE_PCT = 5
 
 
 @dataclass(frozen=True)
@@ -42,7 +47,10 @@ async def new_subscriptions(db: AsyncSession, user: User, now: datetime) -> list
             type=NotificationType.NEW_SUBSCRIPTION,
             dedupe_key=f"new_subscription:{row.id}",
             title="Нова підписка",
-            body=f"{row.name}: {format_money(row.amount, row.currency_code)} щомісяця. Додали її до твоїх підписок.",
+            body=(
+                f"{row.name}: {format_money(row.amount, row.currency_code)} щомісяця, списується вже "
+                f"{ORDINALS.get(row.charges_count, f'{row.charges_count}-й')} місяць. Додали до твоїх підписок."
+            ),
             data={"recurring_id": row.id},
         )
         for row in rows
@@ -70,7 +78,34 @@ async def subscription_price_increases(db: AsyncSession, user: User, now: dateti
     ]
 
 
+async def month_pace(db: AsyncSession, user: User, now: datetime) -> list[NotificationDraft]:
+    if not PACE_FIRST_DAY <= now.day <= PACE_LAST_DAY:
+        return []
+    pace = await AnalyticsService(db, user.id, DEFAULT_TIMEZONE, today=now.date()).month_pace()
+    if pace is None or pace.usual <= 0 or pace.spent <= 0:
+        return []
+    change = round((pace.spent - pace.usual) / pace.usual * 100)
+    period = f"З 1 по {pace.day} {MONTH_GENITIVE[now.month - 1]}"
+    spent = format_money(round(pace.spent, -2), UAH)
+    if change <= -USUAL_PACE_PCT:
+        body = f"Ти молодець: {period.lower()} витрачено {spent}, це на {-change}% менше, ніж зазвичай."
+    elif change < USUAL_PACE_PCT:
+        body = f"{period} витрачено {spent}. Йдеш у звичному темпі."
+    else:
+        body = f"{period} витрачено {spent}, це на {change}% більше, ніж зазвичай."
+        if pace.top_category is not None:
+            body += f" Найбільше зросла категорія «{pace.top_category.name}»: +{format_money(round(pace.top_category_diff, -2), UAH)}."
+    return [NotificationDraft(
+        type=NotificationType.MONTH_PACE,
+        dedupe_key=f"month_pace:{pace.month}",
+        title="Темп місяця",
+        body=body,
+        data={"month": pace.month},
+    )]
+
+
 CHECKS: dict[NotificationType, Check] = {
     NotificationType.SUBSCRIPTION_PRICE: subscription_price_increases,
     NotificationType.NEW_SUBSCRIPTION: new_subscriptions,
+    NotificationType.MONTH_PACE: month_pace,
 }

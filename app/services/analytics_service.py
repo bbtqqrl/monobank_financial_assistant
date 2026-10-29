@@ -30,6 +30,7 @@ from app.schemas.analytics import (
     MerchantItem,
     MerchantsResponse,
     MonthlyResponse,
+    MonthPace,
     MonthTotal,
     OtherShare,
     PeriodInfo,
@@ -48,11 +49,17 @@ MIN_CHANGE_AMOUNT = 20_000
 MIN_GROWTH_STREAK = 2
 INSIGHT_WINDOW_MONTHS = 6
 MAX_INSIGHTS = 3
+PACE_HISTORY_MONTHS = 12
+MIN_PACE_MONTHS = 3
 EQUAL_TOLERANCE = 0.01
 
 MONTH_LOCATIVE = (
     "січні", "лютому", "березні", "квітні", "травні", "червні",
     "липні", "серпні", "вересні", "жовтні", "листопаді", "грудні",
+)
+MONTH_GENITIVE = (
+    "січня", "лютого", "березня", "квітня", "травня", "червня",
+    "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
 )
 ORDINALS = {
     2: "другий", 3: "третій", 4: "четвертий", 5: "п'ятий", 6: "шостий", 7: "сьомий",
@@ -190,7 +197,7 @@ class AnalyticsService:
 
     def __init__(
         self, db: AsyncSession, user_id: int, timezone: str, account_ids: list[int] | None = None,
-        place_ids: list[int] | None = None, cities: list[str] | None = None,
+        place_ids: list[int] | None = None, cities: list[str] | None = None, today: date | None = None,
     ):
         self.repo = AnalyticsRepository(db)
         self.user_id = user_id
@@ -198,7 +205,7 @@ class AnalyticsService:
         self.account_ids = account_ids
         self.place_ids = place_ids
         self.city_names = cities
-        self.today = datetime.now(ZoneInfo(timezone)).date()
+        self.today = today or datetime.now(ZoneInfo(timezone)).date()
         self.current_month = self.today.replace(day=1)
         self._history_start: date | None = None
         self._history_loaded = False
@@ -357,6 +364,30 @@ class AnalyticsService:
             months=monthly,
             average=average,
             selected_vs_average=selected_vs_average,
+        )
+
+    async def month_pace(self) -> MonthPace | None:
+        month = self.current_month
+        day = self.today.day
+        window = [add_months(month, offset) for offset in range(-PACE_HISTORY_MONTHS, 1)]
+        rows = await self._day_rows(window[0], month)
+        complete = [item.month for item in await self._month_totals(window, rows) if item.complete]
+        if len(complete) < MIN_PACE_MONTHS:
+            return None
+        current = month_key(month)
+        grown = []
+        for category in {row.category.id: row.category for row in rows if row.month == current}.values():
+            usual = statistics.median(self._sum(rows, m, category.id, upto_day=day) for m in complete)
+            grown.append((self._sum(rows, current, category.id, upto_day=day) - round(usual), category))
+        top_diff, top_category = max(grown, key=lambda item: item[0], default=(0, None))
+        return MonthPace(
+            month=current,
+            day=day,
+            spent=self._sum(rows, current, upto_day=day),
+            usual=round(statistics.median(self._sum(rows, m, upto_day=day) for m in complete)),
+            months_used=len(complete),
+            top_category=top_category if top_diff > 0 else None,
+            top_category_diff=max(top_diff, 0),
         )
 
     async def insights(self, month: date) -> InsightsResponse:
