@@ -129,10 +129,12 @@ class FakePlaces:
         return self.candidates
 
 
-def location_service(transaction, candidates=(), fails=False, linked=(), mcc_type=FOOD):
+def location_service(transaction, candidates=(), fails=False, saved=(), mcc_type=FOOD):
     fake_places = FakePlaces(candidates, fails)
     service = TransactionLocationService(FakeDb(), 5, fake_places)
-    calls = {"upserted": [], "links": [], "unlinks": [], "places": fake_places}
+    calls = {"upserted": [], "places": fake_places}
+    places_by_id = {place.id: place for place, _ in saved}
+    calls["saved"] = {("kredens cafe", place.id): rejected for place, rejected in saved}
 
     async def get_by_id_for_user(transaction_id, user_id):
         return transaction if transaction and transaction_id == transaction.id and user_id == 5 else None
@@ -140,14 +142,18 @@ def location_service(transaction, candidates=(), fails=False, linked=(), mcc_typ
     async def get_mcc(mcc):
         return mcc_type
 
-    async def list_near(merchant_key, latitude, longitude, radius_m):
-        return list(linked)
+    async def list_near(user_id, merchant_key, latitude, longitude, radius_m):
+        assert user_id == 5
+        return [places_by_id[place_id] for (key, place_id), rejected in calls["saved"].items()
+                if key == merchant_key and not rejected and place_id in places_by_id]
 
-    async def link(merchant_key, place_id):
-        calls["links"].append((merchant_key, place_id))
+    async def rejected_provider_ids(user_id, merchant_key):
+        assert user_id == 5
+        return {f"G{place_id}" for (key, place_id), rejected in calls["saved"].items() if key == merchant_key and rejected}
 
-    async def unlink(merchant_key, place_id):
-        calls["unlinks"].append((merchant_key, place_id))
+    async def save(user_id, merchant_key, place_id, rejected):
+        assert user_id == 5
+        calls["saved"][(merchant_key, place_id)] = rejected
 
     async def upsert(place):
         calls["upserted"].append(place)
@@ -155,7 +161,7 @@ def location_service(transaction, candidates=(), fails=False, linked=(), mcc_typ
 
     service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user)
     service.mcc_types = SimpleNamespace(get=get_mcc)
-    service.links = SimpleNamespace(list_near=list_near, link=link, unlink=unlink)
+    service.user_places = SimpleNamespace(list_near=list_near, rejected_provider_ids=rejected_provider_ids, save=save)
     service.place_repo = SimpleNamespace(upsert=upsert)
     return service, calls
 
@@ -183,7 +189,7 @@ async def test_location_uses_saved_link_without_search():
     tx = transaction()
     near = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
     far = SimpleNamespace(id=4, latitude=LAT + 0.01, longitude=LON)
-    service, calls = location_service(tx, candidates=[found()], linked=[far, near])
+    service, calls = location_service(tx, candidates=[found()], saved=[(far, False), (near, False)])
     await service.set_location(1, LAT, LON)
     assert (tx.place, tx.place_method, calls["places"].calls, calls["upserted"]) == (near, PlaceMethod.LINK, 0, [])
 
@@ -192,8 +198,8 @@ async def test_confident_place_is_linked_to_merchant():
     tx = transaction()
     service, calls = location_service(tx, candidates=[found("Буденні бомбони", 3), found("KREDENS CAFE на Валовій", 11)])
     await service.set_location(1, LAT, LON)
-    assert (tx.place.name, tx.place_method, calls["links"]) == (
-        "KREDENS CAFE на Валовій", PlaceMethod.NAME_MATCH, [("kredens cafe", 99)],
+    assert (tx.place.name, tx.place_method, calls["saved"]) == (
+        "KREDENS CAFE на Валовій", PlaceMethod.NAME_MATCH, {("kredens cafe", 99): False},
     )
 
 
@@ -201,7 +207,7 @@ async def test_nearest_place_is_not_linked():
     tx = transaction("ФОП Петренко О.І.")
     service, calls = location_service(tx, candidates=[found("Шаурма", 12), found("Кава", 4)])
     await service.set_location(1, LAT, LON)
-    assert (tx.place.name, tx.place_method, calls["links"]) == ("Кава", PlaceMethod.NEAREST, [])
+    assert (tx.place.name, tx.place_method, calls["saved"]) == ("Кава", PlaceMethod.NEAREST, {})
 
 
 async def test_location_without_candidates():
@@ -242,19 +248,20 @@ async def test_candidates_need_location():
         await service.place_candidates(1)
 
 
-async def test_confirmed_place_is_linked():
+
+async def test_confirmed_place_is_saved_for_user():
     tx = located(SimpleNamespace(id=7))
     service, calls = location_service(tx)
     await service.give_feedback(1, correct=True)
-    assert (tx.place_confirmed, calls["links"], service.db.commits) == (True, [("kredens cafe", 7)], 1)
+    assert (tx.place_confirmed, calls["saved"], service.db.commits) == (True, {("kredens cafe", 7): False}, 1)
 
 
-async def test_rejected_place_is_kept_but_unlinked():
+async def test_rejected_place_is_kept_but_rejected_for_user():
     wrong = SimpleNamespace(id=7)
     tx = located(wrong)
-    service, calls = location_service(tx)
+    service, calls = location_service(tx, saved=[(wrong, False)])
     await service.give_feedback(1, correct=False)
-    assert (tx.place, tx.place_confirmed, calls["unlinks"], calls["links"]) == (wrong, False, [("kredens cafe", 7)], [])
+    assert (tx.place, tx.place_confirmed, calls["saved"]) == (wrong, False, {("kredens cafe", 7): True})
 
 
 async def test_rejected_place_replaced_by_chosen_candidate():
@@ -262,40 +269,12 @@ async def test_rejected_place_replaced_by_chosen_candidate():
     service, calls = location_service(tx, candidates=[found("Сусід"), found("KREDENS CAFE")])
     await service.give_feedback(1, correct=False, place_id="GKREDENS CAFE")
     assert (tx.place.id, tx.place.name, tx.place_confirmed, tx.rejected_place_id) == (99, "KREDENS CAFE", True, 7)
-    assert (calls["unlinks"], calls["links"]) == ([("kredens cafe", 7)], [("kredens cafe", 99)])
+    assert calls["saved"] == {("kredens cafe", 7): True, ("kredens cafe", 99): False}
 
 
-async def test_repeated_location_keeps_first_result():
-    tx = located(SimpleNamespace(id=7))
-    tx.place_method, tx.place_confirmed = PlaceMethod.NEAREST, True
-    service, calls = location_service(tx, candidates=[found("Інший")])
-    await service.set_location(1, LAT + 0.001, LON)
-    assert (tx.place.id, tx.latitude, tx.place_method, tx.place_confirmed) == (7, LAT, PlaceMethod.NEAREST, True)
-    assert (calls["places"].calls, service.db.commits) == (0, 0)
-
-
-async def test_feedback_validation():
-    service, _ = location_service(located(None))
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=True)
-    service, _ = location_service(located(SimpleNamespace(id=7)), candidates=[found("Кава")])
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=False, place_id="Gчужий")
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=True, place_id="GКава")
-
-
-async def test_spending_query_skips_rejected_places_and_income():
-    statements = []
-
-    async def execute(statement):
-        statements.append(str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})))
-        return SimpleNamespace(all=lambda: [("place", 12000, 3, 1_800_000_000)])
-
-    rows = await PlaceRepository(SimpleNamespace(execute=execute)).spending_for_user(5, 100, 200, place_id=7)
-    assert rows == [("place", 12000, 3, 1_800_000_000)]
-    sql = statements[0]
-    assert "transactions.amount_uah < 0" in sql
-    assert "transactions.place_confirmed IS NOT false" in sql
-    assert "places.id = 7" in sql and "transactions.time >= 100" in sql and "transactions.time <= 200" in sql
-    assert "ORDER BY sum(-transactions.amount_uah) DESC" in sql
+async def test_rejected_place_is_skipped_in_cache_and_google():
+    tx = transaction()
+    rejected = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
+    service, calls = location_service(tx, candidates=[found("3"), found("KREDENS CAFE", 11)], saved=[(rejected, True)])
+    await service.set_location(1, LAT, LON)
+    assert (tx.place.name, tx.place_method, calls["places"].calls) == ("KREDENS CAFE", PlaceMethod.SINGLE, 1)

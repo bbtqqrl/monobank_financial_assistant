@@ -15,6 +15,6 @@ from app.db.models.memory import Memory
 from app.db.models.place import Place
 from app.db.models.device import Device
 from app.db.models.mcc_place_type import MccPlaceType
-from app.db.models.merchant_place import MerchantPlace
+from app.db.models.user_place import UserPlace
 from app.db.models.recurring_payment import RecurringPayment
 from app.db.models.notification import Notification
