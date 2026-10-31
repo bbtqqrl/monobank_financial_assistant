@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,8 +19,10 @@ from app.schemas.analytics import (
     MonthlyResponse,
     PlacesResponse,
     SpendingResponse,
+    TripsResponse,
 )
 from app.services.analytics_service import (
+    TRIPS_DEFAULT_DAYS,
     AnalyticsService,
     Comparison,
     Period,
@@ -170,6 +172,21 @@ async def analytics_cities(
     service = _service(db, current_user, scope)
     resolved, _ = _resolve(service, period)
     return await service.cities(resolved)
+
+
+@router.get("/trips", response_model=TripsResponse)
+async def analytics_trips(
+    period: PeriodQuery = Depends(period_query),
+    sort: Literal["date", "amount", "city"] = "date",
+    scope: ScopeQuery = Depends(scope_query),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = _service(db, current_user, scope)
+    if period.month is None and period.date_from is None and period.date_to is None:
+        period = PeriodQuery(None, service.today - timedelta(days=TRIPS_DEFAULT_DAYS - 1), service.today)
+    resolved, _ = _resolve(service, period)
+    return await service.trips(resolved, sort)
 
 
 @router.get("/changes", response_model=ChangesResponse)

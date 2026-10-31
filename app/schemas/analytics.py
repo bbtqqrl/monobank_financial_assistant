@@ -236,3 +236,27 @@ class CitiesResponse(BaseModel):
     total: int
     unlocated_amount: int
     items: list[CityItem]
+
+
+class TripPlace(BaseModel):
+    place_id: int
+    name: str
+    type_name: str | None
+    amount: int
+    transaction_count: int
+
+
+class TripItem(BaseModel):
+    city: str
+    start: date
+    end: date
+    days: int
+    amount: int
+    transaction_count: int
+    places: list[TripPlace]
+
+
+class TripsResponse(BaseModel):
+    period: PeriodInfo
+    home_city: str | None
+    items: list[TripItem]

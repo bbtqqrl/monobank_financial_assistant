@@ -89,3 +89,114 @@ def test_assistant_sees_place_unless_rejected():
     assert item["place"] == {"id": 7, "name": "KREDENS CAFE", "type": "Кав'ярня", "city": "Львів"}
     assert "place" not in _transaction_item(assistant_transaction(place_confirmed=False), None, 980, zone)
     assert "place" not in _transaction_item(assistant_transaction(place=None), None, 980, zone)
+
+
+def trip_row(day, place_id, name, city, amount, count=1):
+    return {"day": day, "place_id": place_id, "place_name": name, "place_type": None, "place_city": city,
+            "sum": -amount, "count": count}
+
+
+class TripRepo:
+    def __init__(self, rows, home_days):
+        self.rows = rows
+        self.home_days = home_days
+        self.calls = []
+
+    async def aggregate(self, user_id, filters, timezone, group_by=None, metrics=None):
+        self.calls.append((group_by, filters))
+        if group_by == ["day", "city"]:
+            return self.home_days
+        return self.rows
+
+
+def trips_service(rows, home_days, **scope):
+    analytics = AnalyticsService(None, 5, "Europe/Kyiv", **scope)
+    analytics.repo = TripRepo(rows, home_days)
+    return analytics
+
+
+HOME_DAYS = [
+    {"day": f"2026-09-{d:02d}", "city": "Київ", "count": 1} for d in range(1, 11)
+] + [{"day": "2026-10-03", "city": "Львів", "count": 2}, {"day": None, "city": None, "count": 5}]
+
+
+async def test_trips_split_by_gap_and_skip_home_city():
+    rows = [
+        trip_row("2026-10-03", 1, "KREDENS", "Львів", 30000),
+        trip_row("2026-10-03", 2, "Рукавичка", "Львів", 10000, 2),
+        trip_row("2026-10-05", 1, "KREDENS", "Львів", 20000),
+        trip_row("2026-10-04", 9, "Сільпо", "Київ", 50000),
+        trip_row("2026-10-20", 3, "Копальня", "Львів", 5000),
+        trip_row("2026-10-10", 4, "Хінкальня", "Одеса", 70000),
+        trip_row("2026-10-11", None, None, None, 99999),
+    ]
+    result = await trips_service(rows, HOME_DAYS).trips(PERIOD, "date")
+    assert result.home_city == "Київ"
+    assert [(t.city, t.start.day, t.end.day, t.days, t.amount, t.transaction_count) for t in result.items] == [
+        ("Львів", 20, 20, 1, 5000, 1), ("Одеса", 10, 10, 1, 70000, 1), ("Львів", 3, 5, 3, 60000, 4),
+    ]
+    assert [(p.name, p.amount, p.transaction_count) for p in result.items[2].places] == [
+        ("KREDENS", 50000, 2), ("Рукавичка", 10000, 2),
+    ]
+
+
+async def test_trip_breaks_after_more_than_two_empty_days():
+    rows = [trip_row("2026-10-01", 1, "A", "Львів", 100), trip_row("2026-10-04", 1, "A", "Львів", 100),
+            trip_row("2026-10-08", 1, "A", "Львів", 100)]
+    result = await trips_service(rows, HOME_DAYS).trips(PERIOD, "date")
+    assert [(t.start.day, t.end.day) for t in result.items] == [(8, 8), (1, 4)]
+
+
+async def test_trips_sorting_and_refund_only_trip_is_skipped():
+    rows = [
+        trip_row("2026-10-03", 1, "A", "Львів", 30000),
+        trip_row("2026-10-10", 2, "B", "Одеса", 70000),
+        trip_row("2026-10-20", 3, "C", "Львів", 5000),
+        trip_row("2026-10-25", 4, "D", "Ужгород", -3000),
+    ]
+    by_amount = await trips_service(rows, HOME_DAYS).trips(PERIOD, "amount")
+    assert [(t.city, t.amount) for t in by_amount.items] == [("Одеса", 70000), ("Львів", 30000), ("Львів", 5000)]
+    by_city = await trips_service(rows, HOME_DAYS).trips(PERIOD, "city")
+    assert [(t.city, t.start.day) for t in by_city.items] == [("Львів", 20), ("Львів", 3), ("Одеса", 10)]
+
+
+async def test_home_city_ignores_scope_and_is_none_without_places():
+    analytics = trips_service([trip_row("2026-10-03", 1, "A", "Львів", 100)], [], account_ids=[2], cities=["Львів"])
+    result = await analytics.trips(PERIOD, "date")
+    assert result.home_city is None and [t.city for t in result.items] == ["Львів"]
+    home_filter = next(f for group_by, f in analytics.repo.calls if group_by == ["day", "city"])
+    assert home_filter.account_ids is None and home_filter.cities is None
+    trips_filter = next(f for group_by, f in analytics.repo.calls if group_by == ["day", "place"])
+    assert trips_filter.account_ids == [2] and trips_filter.cities == ["Львів"]
+
+
+async def test_trip_queries_compile():
+    statements = []
+
+    async def execute(statement):
+        statements.append(str(statement.compile(dialect=postgresql.dialect())))
+        return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: []))
+
+    analytics = AnalyticsService(SimpleNamespace(execute=execute), 5, "Europe/Kyiv")
+    result = await analytics.trips(PERIOD, "date")
+    assert result.items == [] and len(statements) == 2
+    assert "GROUP BY to_char" in statements[0] and "places.city" in statements[0]
+
+
+async def test_trip_crossing_period_border_is_shown_whole():
+    rows = [
+        trip_row("2026-09-10", 1, "A", "Одеса", 100),
+        trip_row("2026-09-29", 2, "B", "Львів", 100),
+        trip_row("2026-10-02", 2, "B", "Львів", 300),
+        trip_row("2026-10-30", 3, "C", "Ужгород", 100),
+        trip_row("2026-11-01", 3, "C", "Ужгород", 100),
+        trip_row("2026-11-05", 4, "D", "Одеса", 100),
+    ]
+    analytics = trips_service(rows, HOME_DAYS)
+    result = await analytics.trips(PERIOD, "date")
+    assert [(t.city, t.start, t.end, t.amount) for t in result.items] == [
+        ("Ужгород", date(2026, 10, 30), date(2026, 11, 1), 200),
+        ("Львів", date(2026, 9, 29), date(2026, 10, 2), 400),
+    ]
+    trips_filter = next(f for group_by, f in analytics.repo.calls if group_by == ["day", "place"])
+    assert (trips_filter.date_from, trips_filter.date_to) == analytics._bounds(Period(date(2026, 8, 2), date(2026, 12, 30)))
