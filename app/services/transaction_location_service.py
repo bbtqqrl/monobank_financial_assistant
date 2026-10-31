@@ -3,9 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.place import Place
 from app.db.models.transaction import TransactionRaw
 from app.repositories.mcc_place_type import MccPlaceTypeRepository
-from app.repositories.merchant_place import MerchantPlaceRepository
 from app.repositories.place import PlaceRepository
 from app.repositories.transaction import TransactionRepository
+from app.repositories.user_place import UserPlaceRepository
 from app.schemas.place import PlaceResponse
 from app.services.errors import InvalidRequestError, NotFoundError, ServiceUnavailableError
 from app.services.merchant_key import build_merchant_key
@@ -23,7 +23,7 @@ class TransactionLocationService:
         self.user_id = user_id
         self.places = places or PlaceService()
         self.place_repo = PlaceRepository(db)
-        self.links = MerchantPlaceRepository(db)
+        self.user_places = UserPlaceRepository(db)
         self.mcc_types = MccPlaceTypeRepository(db)
         self.transactions = TransactionRepository(db)
 
@@ -39,6 +39,19 @@ class TransactionLocationService:
         await self.db.commit()
         return transaction
 
+    async def retry_place(self, transaction_id: int) -> bool:
+        transaction = await self._get(transaction_id)
+        if transaction.latitude is None or transaction.place_method is not None or transaction.place is not None:
+            return False
+        place, method = await self._locate(transaction, transaction.latitude, transaction.longitude)
+        if method is None:
+            return False
+        if not await self.transactions.set_found_place(transaction.id, place.id if place else None, method):
+            await self.db.rollback()
+            return False
+        await self.db.commit()
+        return True
+
     async def place_candidates(self, transaction_id: int) -> list[PlaceResponse]:
         return await self._search_around(await self._get(transaction_id))
 
@@ -51,12 +64,12 @@ class TransactionLocationService:
             if place_id is not None:
                 raise InvalidRequestError("place_id can only be sent with correct=false")
             if merchant_key:
-                await self.links.link(merchant_key, transaction.place.id)
+                await self.user_places.save(self.user_id, merchant_key, transaction.place.id, rejected=False)
             transaction.place_confirmed = True
         else:
             wrong = transaction.place
             if wrong is not None and merchant_key:
-                await self.links.unlink(merchant_key, wrong.id)
+                await self.user_places.save(self.user_id, merchant_key, wrong.id, rejected=True)
             if place_id:
                 chosen = await self._pick_candidate(transaction, place_id)
                 if wrong is not None and wrong.id != chosen.id:
@@ -64,7 +77,7 @@ class TransactionLocationService:
                 transaction.place = chosen
                 transaction.place_confirmed = True
                 if merchant_key:
-                    await self.links.link(merchant_key, chosen.id)
+                    await self.user_places.save(self.user_id, merchant_key, chosen.id, rejected=False)
             else:
                 transaction.place_confirmed = False
         await self.db.commit()
@@ -106,22 +119,24 @@ class TransactionLocationService:
         try:
             candidates = await self.places.search(latitude, longitude, place_filter)
         except ServiceUnavailableError:
-            # TODO: повторити пошук місця пізніше для транзакцій з координатами, але без place_method
             return None, None
 
+        if merchant_key:
+            rejected = await self.user_places.rejected_provider_ids(self.user_id, merchant_key)
+            candidates = [candidate for candidate in candidates if candidate.place_id not in rejected]
         found, method = choose_place(candidates, transaction.description or "")
         if found is None:
             return None, method
 
         place = await self.place_repo.upsert(found)
         if merchant_key and method in CONFIDENT_PLACE_METHODS:
-            await self.links.link(merchant_key, place.id)
+            await self.user_places.save(self.user_id, merchant_key, place.id, rejected=False)
         return place, method
 
     async def _linked_place(self, merchant_key: str, latitude: float, longitude: float) -> Place | None:
         if not merchant_key:
             return None
-        places = await self.links.list_near(merchant_key, latitude, longitude, LINK_RADIUS_M)
+        places = await self.user_places.list_near(self.user_id, merchant_key, latitude, longitude, LINK_RADIUS_M)
         distance = {place.id: distance_m(latitude, longitude, place.latitude, place.longitude) for place in places}
         nearby = [place for place in places if distance[place.id] <= LINK_RADIUS_M]
         return min(nearby, key=lambda place: distance[place.id], default=None)

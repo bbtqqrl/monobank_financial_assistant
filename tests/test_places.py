@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.repositories.place import PlaceRepository
+from app.repositories.transaction import TransactionRepository
 from app.schemas.place import PlaceResponse
 from app.services import places
 from app.services.errors import InvalidRequestError, NotFoundError, ServiceUnavailableError
@@ -112,9 +113,13 @@ async def test_upsert_statement_compiles():
 class FakeDb:
     def __init__(self):
         self.commits = 0
+        self.rollbacks = 0
 
     async def commit(self):
         self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
 
 
 class FakePlaces:
@@ -129,10 +134,12 @@ class FakePlaces:
         return self.candidates
 
 
-def location_service(transaction, candidates=(), fails=False, linked=(), mcc_type=FOOD):
+def location_service(transaction, candidates=(), fails=False, saved=(), mcc_type=FOOD):
     fake_places = FakePlaces(candidates, fails)
     service = TransactionLocationService(FakeDb(), 5, fake_places)
-    calls = {"upserted": [], "links": [], "unlinks": [], "places": fake_places}
+    calls = {"upserted": [], "places": fake_places}
+    places_by_id = {place.id: place for place, _ in saved}
+    calls["saved"] = {("kredens cafe", place.id): rejected for place, rejected in saved}
 
     async def get_by_id_for_user(transaction_id, user_id):
         return transaction if transaction and transaction_id == transaction.id and user_id == 5 else None
@@ -140,22 +147,30 @@ def location_service(transaction, candidates=(), fails=False, linked=(), mcc_typ
     async def get_mcc(mcc):
         return mcc_type
 
-    async def list_near(merchant_key, latitude, longitude, radius_m):
-        return list(linked)
+    async def list_near(user_id, merchant_key, latitude, longitude, radius_m):
+        assert user_id == 5
+        return [places_by_id[place_id] for (key, place_id), rejected in calls["saved"].items()
+                if key == merchant_key and not rejected and place_id in places_by_id]
 
-    async def link(merchant_key, place_id):
-        calls["links"].append((merchant_key, place_id))
+    async def rejected_provider_ids(user_id, merchant_key):
+        assert user_id == 5
+        return {f"G{place_id}" for (key, place_id), rejected in calls["saved"].items() if key == merchant_key and rejected}
 
-    async def unlink(merchant_key, place_id):
-        calls["unlinks"].append((merchant_key, place_id))
+    async def save(user_id, merchant_key, place_id, rejected):
+        assert user_id == 5
+        calls["saved"][(merchant_key, place_id)] = rejected
 
     async def upsert(place):
         calls["upserted"].append(place)
         return SimpleNamespace(id=99, latitude=place.latitude, longitude=place.longitude, name=place.name)
 
-    service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user)
+    async def set_found_place(transaction_id, place_id, method):
+        calls["found"] = (transaction_id, place_id, method)
+        return calls.get("still_waiting", True)
+
+    service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user, set_found_place=set_found_place)
     service.mcc_types = SimpleNamespace(get=get_mcc)
-    service.links = SimpleNamespace(list_near=list_near, link=link, unlink=unlink)
+    service.user_places = SimpleNamespace(list_near=list_near, rejected_provider_ids=rejected_provider_ids, save=save)
     service.place_repo = SimpleNamespace(upsert=upsert)
     return service, calls
 
@@ -183,7 +198,7 @@ async def test_location_uses_saved_link_without_search():
     tx = transaction()
     near = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
     far = SimpleNamespace(id=4, latitude=LAT + 0.01, longitude=LON)
-    service, calls = location_service(tx, candidates=[found()], linked=[far, near])
+    service, calls = location_service(tx, candidates=[found()], saved=[(far, False), (near, False)])
     await service.set_location(1, LAT, LON)
     assert (tx.place, tx.place_method, calls["places"].calls, calls["upserted"]) == (near, PlaceMethod.LINK, 0, [])
 
@@ -192,8 +207,8 @@ async def test_confident_place_is_linked_to_merchant():
     tx = transaction()
     service, calls = location_service(tx, candidates=[found("Буденні бомбони", 3), found("KREDENS CAFE на Валовій", 11)])
     await service.set_location(1, LAT, LON)
-    assert (tx.place.name, tx.place_method, calls["links"]) == (
-        "KREDENS CAFE на Валовій", PlaceMethod.NAME_MATCH, [("kredens cafe", 99)],
+    assert (tx.place.name, tx.place_method, calls["saved"]) == (
+        "KREDENS CAFE на Валовій", PlaceMethod.NAME_MATCH, {("kredens cafe", 99): False},
     )
 
 
@@ -201,7 +216,7 @@ async def test_nearest_place_is_not_linked():
     tx = transaction("ФОП Петренко О.І.")
     service, calls = location_service(tx, candidates=[found("Шаурма", 12), found("Кава", 4)])
     await service.set_location(1, LAT, LON)
-    assert (tx.place.name, tx.place_method, calls["links"]) == ("Кава", PlaceMethod.NEAREST, [])
+    assert (tx.place.name, tx.place_method, calls["saved"]) == ("Кава", PlaceMethod.NEAREST, {})
 
 
 async def test_location_without_candidates():
@@ -242,19 +257,20 @@ async def test_candidates_need_location():
         await service.place_candidates(1)
 
 
-async def test_confirmed_place_is_linked():
+
+async def test_confirmed_place_is_saved_for_user():
     tx = located(SimpleNamespace(id=7))
     service, calls = location_service(tx)
     await service.give_feedback(1, correct=True)
-    assert (tx.place_confirmed, calls["links"], service.db.commits) == (True, [("kredens cafe", 7)], 1)
+    assert (tx.place_confirmed, calls["saved"], service.db.commits) == (True, {("kredens cafe", 7): False}, 1)
 
 
-async def test_rejected_place_is_kept_but_unlinked():
+async def test_rejected_place_is_kept_but_rejected_for_user():
     wrong = SimpleNamespace(id=7)
     tx = located(wrong)
-    service, calls = location_service(tx)
+    service, calls = location_service(tx, saved=[(wrong, False)])
     await service.give_feedback(1, correct=False)
-    assert (tx.place, tx.place_confirmed, calls["unlinks"], calls["links"]) == (wrong, False, [("kredens cafe", 7)], [])
+    assert (tx.place, tx.place_confirmed, calls["saved"]) == (wrong, False, {("kredens cafe", 7): True})
 
 
 async def test_rejected_place_replaced_by_chosen_candidate():
@@ -262,40 +278,69 @@ async def test_rejected_place_replaced_by_chosen_candidate():
     service, calls = location_service(tx, candidates=[found("Сусід"), found("KREDENS CAFE")])
     await service.give_feedback(1, correct=False, place_id="GKREDENS CAFE")
     assert (tx.place.id, tx.place.name, tx.place_confirmed, tx.rejected_place_id) == (99, "KREDENS CAFE", True, 7)
-    assert (calls["unlinks"], calls["links"]) == ([("kredens cafe", 7)], [("kredens cafe", 99)])
+    assert calls["saved"] == {("kredens cafe", 7): True, ("kredens cafe", 99): False}
 
 
-async def test_repeated_location_keeps_first_result():
-    tx = located(SimpleNamespace(id=7))
-    tx.place_method, tx.place_confirmed = PlaceMethod.NEAREST, True
-    service, calls = location_service(tx, candidates=[found("Інший")])
-    await service.set_location(1, LAT + 0.001, LON)
-    assert (tx.place.id, tx.latitude, tx.place_method, tx.place_confirmed) == (7, LAT, PlaceMethod.NEAREST, True)
-    assert (calls["places"].calls, service.db.commits) == (0, 0)
+async def test_rejected_place_is_skipped_in_cache_and_google():
+    tx = transaction()
+    rejected = SimpleNamespace(id=3, latitude=LAT + 0.0002, longitude=LON)
+    service, calls = location_service(tx, candidates=[found("3"), found("KREDENS CAFE", 11)], saved=[(rejected, True)])
+    await service.set_location(1, LAT, LON)
+    assert (tx.place.name, tx.place_method, calls["places"].calls) == ("KREDENS CAFE", PlaceMethod.SINGLE, 1)
 
 
-async def test_feedback_validation():
-    service, _ = location_service(located(None))
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=True)
-    service, _ = location_service(located(SimpleNamespace(id=7)), candidates=[found("Кава")])
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=False, place_id="Gчужий")
-    with pytest.raises(InvalidRequestError):
-        await service.give_feedback(1, correct=True, place_id="GКава")
+def waiting():
+    tx = located()
+    tx.place_method = None
+    return tx
 
 
-async def test_spending_query_skips_rejected_places_and_income():
+async def test_retry_saves_place_found_after_outage():
+    service, calls = location_service(waiting(), candidates=[found("KREDENS CAFE")])
+    assert await service.retry_place(1) is True
+    assert (calls["found"], calls["saved"], service.db.commits) == (
+        (1, 99, PlaceMethod.SINGLE), {("kredens cafe", 99): False}, 1,
+    )
+
+
+async def test_retry_saves_not_found_to_stop_retrying():
+    service, calls = location_service(waiting())
+    assert await service.retry_place(1) is True
+    assert calls["found"] == (1, None, PlaceMethod.NOT_FOUND)
+
+
+async def test_retry_waits_while_search_is_down():
+    service, calls = location_service(waiting(), fails=True)
+    assert await service.retry_place(1) is False
+    assert ("found" not in calls, service.db.commits) == (True, 0)
+
+
+async def test_retry_skips_place_picked_by_user():
+    tx = waiting()
+    tx.place = SimpleNamespace(id=7)
+    service, calls = location_service(tx, candidates=[found()])
+    assert await service.retry_place(1) is False
+    assert calls["places"].calls == 0
+
+
+async def test_retry_does_not_override_feedback_given_meanwhile():
+    service, calls = location_service(waiting(), candidates=[found("KREDENS CAFE")])
+    calls["still_waiting"] = False
+    assert await service.retry_place(1) is False
+    assert (service.db.commits, service.db.rollbacks) == (0, 1)
+
+
+async def test_unplaced_queries_skip_user_answers():
     statements = []
 
     async def execute(statement):
         statements.append(str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})))
-        return SimpleNamespace(all=lambda: [("place", 12000, 3, 1_800_000_000)])
+        return SimpleNamespace(all=lambda: [(1, 5)], rowcount=1)
 
-    rows = await PlaceRepository(SimpleNamespace(execute=execute)).spending_for_user(5, 100, 200, place_id=7)
-    assert rows == [("place", 12000, 3, 1_800_000_000)]
-    sql = statements[0]
-    assert "transactions.amount_uah < 0" in sql
-    assert "transactions.place_confirmed IS NOT false" in sql
-    assert "places.id = 7" in sql and "transactions.time >= 100" in sql and "transactions.time <= 200" in sql
-    assert "ORDER BY sum(-transactions.amount_uah) DESC" in sql
+    repo = TransactionRepository(SimpleNamespace(execute=execute))
+    assert await repo.list_unplaced(100, 50) == [(1, 5)]
+    assert await repo.set_found_place(1, None, PlaceMethod.NOT_FOUND) is True
+    for sql in statements:
+        assert "transactions.latitude IS NOT NULL" in sql and "transactions.place_method IS NULL" in sql
+        assert "transactions.place_id IS NULL" in sql and "transactions.place_confirmed IS NULL" in sql
+    assert "transactions.time >= 100" in statements[0] and "LIMIT 50" in statements[0]

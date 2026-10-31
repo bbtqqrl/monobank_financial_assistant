@@ -13,6 +13,7 @@ from app.services.ai.factory import get_categorization_ai_client
 from app.services.categorization_service import CategorizationAIError, CategorizationService
 from app.services.exchange_rates import amount_uah
 from app.services.statement_backfill_service import run_statement_backfill
+from app.services.transaction_location_service import TransactionLocationService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ GIVE_UP_AFTER = timedelta(hours=24)
 SWEEP_BATCH_SIZE = 200
 CATCH_UP_INTERVAL_SECONDS = 24 * 60 * 60
 SWEEP_CONCURRENCY = 4
+PLACE_RETRY_WINDOW = timedelta(days=7)
+PLACE_RETRY_BATCH_SIZE = 50
 
 
 async def sweep_uncategorized() -> None:
@@ -75,6 +78,22 @@ async def fill_missing_amount_uah() -> None:
         logger.info("Sweeper: filled amount_uah for %s of %s transaction(s)", filled, len(rows))
 
 
+async def retry_place_search() -> None:
+    since = int((datetime.now(timezone.utc) - PLACE_RETRY_WINDOW).timestamp())
+    async with SessionLocal() as db:
+        rows = await TransactionRepository(db).list_unplaced(since, PLACE_RETRY_BATCH_SIZE)
+    found = 0
+    for transaction_id, user_id in rows:
+        async with SessionLocal() as db:
+            try:
+                if await TransactionLocationService(db, user_id).retry_place(transaction_id):
+                    found += 1
+            except Exception:
+                logger.exception("Sweeper: place retry failed for transaction id=%s", transaction_id)
+    if rows:
+        logger.info("Sweeper: place search retried for %s transaction(s), %s done", len(rows), found)
+
+
 async def catch_up_statements() -> None:
     async with SessionLocal() as db:
         users = (await db.execute(
@@ -103,4 +122,8 @@ async def run_sweeper_forever() -> None:
             await sweep_uncategorized()
         except Exception:
             logger.exception("Categorization sweep failed")
+        try:
+            await retry_place_search()
+        except Exception:
+            logger.exception("Place search retry failed")
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
