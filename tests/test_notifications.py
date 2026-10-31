@@ -129,9 +129,11 @@ def test_more_news_plural():
     ]
 
 
-def subscription(id, name, amount, currency=840, previous=None, changed=None, created=NOW, cancelled_at=None):
+def subscription(id, name, amount, currency=840, previous=None, changed=None, created=NOW, cancelled_at=None,
+                 user_kind=None):
     return SimpleNamespace(id=id, name=name, amount=amount, currency_code=currency, previous_amount=previous,
-                           price_changed_at=changed, created_at=created, cancelled_at=cancelled_at, charges_count=2)
+                           price_changed_at=changed, created_at=created, cancelled_at=cancelled_at, charges_count=2,
+                           user_kind=user_kind)
 
 
 def patch_subscriptions(monkeypatch, rows, first_scan):
@@ -149,7 +151,7 @@ def patch_subscriptions(monkeypatch, rows, first_scan):
     monkeypatch.setattr(RecurringPaymentRepository, "first_created_at", fake_first)
 
 
-async def test_new_subscription_skips_first_scan_old_and_cancelled(monkeypatch):
+async def test_new_subscription_skips_first_scan_old_cancelled_and_marked_by_user(monkeypatch):
     from datetime import timedelta
     from app.services.notification_checks import new_subscriptions
 
@@ -159,6 +161,7 @@ async def test_new_subscription_skips_first_scan_old_and_cancelled(monkeypatch):
         subscription(2, "Friendly Share", 12900, currency=980, created=first),
         subscription(3, "Old", 999, created=NOW - timedelta(days=10)),
         subscription(4, "Cancelled", 999, created=NOW - timedelta(hours=3), cancelled_at=1),
+        subscription(5, "Marked", 999, created=NOW - timedelta(hours=3), user_kind="subscription"),
     ], first)
     drafts = await new_subscriptions(None, USER, NOW)
     assert [(d.dedupe_key, d.body, d.data) for d in drafts] == [

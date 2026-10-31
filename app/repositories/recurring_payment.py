@@ -20,8 +20,9 @@ class RecurringPaymentRepository:
     async def lock_user(self, user_id: int) -> None:
         await self.db.execute(select(User.id).where(User.id == user_id).with_for_update())
 
-    async def charges(self, user_id: int, since: int) -> list[Charge]:
+    async def charges(self, user_id: int, since: int, transaction_id: int | None = None) -> list[Charge]:
         parent = aliased(Category)
+        only = [TransactionRaw.id == transaction_id] if transaction_id is not None else []
         result = await self.db.execute(
             select(
                 TransactionRaw.id,
@@ -45,6 +46,7 @@ class RecurringPaymentRepository:
                 TransactionRaw.amount_uah.is_not(None),
                 TransactionRaw.time >= since,
                 Category.kind == "expense",
+                *only,
             )
         )
         return [

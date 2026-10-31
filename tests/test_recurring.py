@@ -154,8 +154,10 @@ class FakeRepo:
     async def lock_user(self, user_id):
         return None
 
-    async def charges(self, user_id, since):
-        return self.items
+    async def charges(self, user_id, since, transaction_id=None):
+        if transaction_id is None:
+            return self.items
+        return [charge for charge in self.items if charge.transaction_id == transaction_id]
 
     async def list_for_user(self, user_id):
         return list(self.rows)
@@ -180,7 +182,10 @@ def service(repo):
     async def delete(row):
         repo.rows.remove(row)
 
-    db = SimpleNamespace(add=repo.rows.append, delete=delete, flush=flush, commit=noop)
+    async def refresh(row):
+        return None
+
+    db = SimpleNamespace(add=repo.rows.append, delete=delete, flush=flush, commit=noop, refresh=refresh)
     result = RecurringService(db)
     result.repo = repo
     return result
@@ -255,3 +260,67 @@ def test_second_apple_subscription_is_not_a_price_change():
     music = charges("Apple", [("2026-10-01", 19900), ("2026-11-01", 19900)], 5818, SUBS)
     clusters = sorted(cluster_charges(icloud + music), key=lambda c: c.last.amount)
     assert [[c.amount for c in cluster.charges] for cluster in clusters] == [[4900, 4900, 4900], [19900, 19900]]
+
+
+async def test_single_charge_marked_as_subscription_stays_and_collects_next_charges():
+    first = charges("Netflix", [("2026-10-05", 25000)], 4899, SUBS)
+    repo = FakeRepo(first)
+    row = await service(repo).mark(first[0].transaction_id, 5, SUBSCRIPTION, NOW)
+    assert (row.kind, row.user_kind, row.charges_count, row.amount) == (SUBSCRIPTION, SUBSCRIPTION, 1, 25000)
+    assert repo.links == {first[0].transaction_id: row.id}
+    assert state(row, NOW) == "active"
+
+    repo.items = first + charges("Netflix", [("2026-11-05", 25000)], 4899, SUBS)
+    assert await service(repo).refresh(5, NOW) == []
+    assert repo.rows == [row] and row.charges_count == 2
+    assert state(row, NOW + 200 * 86400) == "missing"
+
+
+async def test_mark_switches_existing_row_instead_of_duplicating():
+    repo = FakeRepo(FRIENDLY)
+    [row] = await service(repo).refresh(5, NOW)
+    row.declined_kind = SUBSCRIPTION
+    await service(repo).refresh(5, NOW)
+    assert row.kind == REGULAR
+
+    marked = await service(repo).mark(FRIENDLY[-1].transaction_id, 5, SUBSCRIPTION, NOW)
+    assert marked is row and repo.rows == [row]
+    assert (row.kind, row.user_kind, row.declined_kind, row.charges_count) == (SUBSCRIPTION, SUBSCRIPTION, None, 3)
+
+
+async def test_mark_resumes_cancelled_and_rejects_non_expenses():
+    import pytest
+
+    from app.services.errors import InvalidRequestError
+
+    repo = FakeRepo(FRIENDLY)
+    [row] = await service(repo).refresh(5, NOW)
+    row.cancelled_at = NOW - 86400
+    await service(repo).mark(FRIENDLY[0].transaction_id, 5, SUBSCRIPTION, NOW)
+    assert row.cancelled_at is None
+    with pytest.raises(InvalidRequestError):
+        await service(repo).mark(123456, 5, SUBSCRIPTION, NOW)
+
+
+def test_subscription_marks_for_transactions():
+    from app.services.recurring_service import subscription_marks
+
+    def row(id, kind, key, amount, currency=980):
+        return SimpleNamespace(id=id, kind=kind, merchant_key=key, amount=amount, currency_code=currency)
+
+    def tx(description, amount, mcc, linked=None, currency=980):
+        return SimpleNamespace(description=description, amount=amount, operation_amount=None, mcc=mcc,
+                               currency_code=currency, recurring_payment_id=linked)
+
+    rows = [row(1, SUBSCRIPTION, "netflix", 25000), row(2, None, "apple", 4900), row(3, REGULAR, "vodafone", 26000)]
+    subs = SimpleNamespace(slug=SUBS)
+    assert subscription_marks(rows, tx("Netflix", -25000, 4899, linked=1), subs) == (1, False)
+    assert subscription_marks(rows, tx("Netflix", -26000, 4899), subs) == (1, False)
+    assert subscription_marks(rows, tx("Netflix", -25000, 4899, currency=840), subs) == (None, True)
+    assert subscription_marks(rows, tx("Netflix", -45000, 4899), subs) == (None, True)
+    assert subscription_marks(rows, tx("Apple", -4900, 5818), subs) == (None, False)
+    assert subscription_marks(rows, tx("Vodafone", -26000, 4814), None) == (None, False)
+    assert subscription_marks(rows, tx("YouTube", -9900, 1234), subs) == (None, True)
+    assert subscription_marks(rows, tx("Київстар Інтернет", -20000, 4899), SimpleNamespace(slug="internet")) == (None, False)
+    assert subscription_marks(rows, tx("Сільпо", -50000, 5411), SimpleNamespace(slug="produkty")) == (None, False)
+    assert subscription_marks(rows, tx("Netflix", 25000, 4899), subs) == (None, False)

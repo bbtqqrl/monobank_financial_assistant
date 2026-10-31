@@ -6,8 +6,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.db.models.recurring_payment import RecurringPayment
 from app.db.models.user import User
 from app.db.session import get_db
+from app.repositories.recurring_payment import RecurringPaymentRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.place import PlaceBrief, PlaceFeedbackRequest, PlaceResponse, SetLocationRequest
 from app.schemas.transaction import (
@@ -24,6 +26,7 @@ from app.services.categorization_service import (
     CategoryDirectionError,
     NotManualTransactionError,
 )
+from app.services.recurring_service import subscription_marks
 from app.services.transaction_location_service import TransactionLocationService
 from app.services.transaction_pipeline import run_categorization
 from app.services.transaction_service import TransactionService
@@ -37,7 +40,10 @@ def _category_brief(category) -> CategoryBrief | None:
     return CategoryBrief.model_validate(category) if category is not None else None
 
 
-def _to_list_item(transaction, category, account_currency_code: int) -> TransactionListItem:
+def _to_list_item(
+    transaction, category, account_currency_code: int, recurring: list[RecurringPayment],
+) -> TransactionListItem:
+    subscription_id, looks_like_subscription = subscription_marks(recurring, transaction, category)
     return TransactionListItem(
         id=transaction.id,
         source=transaction.source,
@@ -60,6 +66,8 @@ def _to_list_item(transaction, category, account_currency_code: int) -> Transact
         place=PlaceBrief.model_validate(transaction.place) if transaction.place is not None else None,
         place_method=transaction.place_method,
         place_confirmed=transaction.place_confirmed,
+        subscription_id=subscription_id,
+        looks_like_subscription=looks_like_subscription,
     )
 
 
@@ -96,8 +104,9 @@ async def list_transactions(
         limit=limit,
     )
 
+    recurring = await RecurringPaymentRepository(db).list_for_user(current_user.id)
     return TransactionListResponse(
-        items=[_to_list_item(t, c, ccy) for t, c, ccy in rows],
+        items=[_to_list_item(t, c, ccy, recurring) for t, c, ccy in rows],
         page=page,
         limit=limit,
         total=total,
@@ -121,18 +130,7 @@ async def create_transaction(
         comment=data.comment,
     )
 
-    transactions = TransactionRepository(db)
-    row = await transactions.get_detail_for_user(transaction.id, current_user.id)
-    transaction, category, account_currency_code = row
-
-    return TransactionDetail(
-        **_to_list_item(transaction, category, account_currency_code).model_dump(),
-        balance=transaction.balance,
-        comment=transaction.comment,
-        counter_name=transaction.counter_name,
-        counter_edrpou=transaction.counter_edrpou,
-        counter_iban=transaction.counter_iban,
-    )
+    return await _detail(db, transaction.id, current_user.id)
 
 
 @router.get("/{transaction_id}", response_model=TransactionDetail)
@@ -141,22 +139,7 @@ async def get_transaction(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    transactions = TransactionRepository(db)
-    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
-
-    transaction, category, account_currency_code = row
-
-    return TransactionDetail(
-        **_to_list_item(transaction, category, account_currency_code).model_dump(),
-        balance=transaction.balance,
-        comment=transaction.comment,
-        counter_name=transaction.counter_name,
-        counter_edrpou=transaction.counter_edrpou,
-        counter_iban=transaction.counter_iban,
-    )
+    return await _detail(db, transaction_id, current_user.id)
 
 
 @router.patch("/{transaction_id}", response_model=TransactionDetail)
@@ -191,18 +174,7 @@ async def update_manual_transaction(
     if transaction is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
-    transactions = TransactionRepository(db)
-    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category, account_currency_code = row
-
-    return TransactionDetail(
-        **_to_list_item(transaction, category, account_currency_code).model_dump(),
-        balance=transaction.balance,
-        comment=transaction.comment,
-        counter_name=transaction.counter_name,
-        counter_edrpou=transaction.counter_edrpou,
-        counter_iban=transaction.counter_iban,
-    )
+    return await _detail(db, transaction_id, current_user.id)
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -248,18 +220,7 @@ async def update_transaction_category(
     if transaction is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
-    transactions = TransactionRepository(db)
-    row = await transactions.get_detail_for_user(transaction_id, current_user.id)
-    transaction, category, account_currency_code = row
-
-    return TransactionDetail(
-        **_to_list_item(transaction, category, account_currency_code).model_dump(),
-        balance=transaction.balance,
-        comment=transaction.comment,
-        counter_name=transaction.counter_name,
-        counter_edrpou=transaction.counter_edrpou,
-        counter_iban=transaction.counter_iban,
-    )
+    return await _detail(db, transaction_id, current_user.id)
 
 
 @router.post("/{transaction_id}/location", response_model=TransactionDetail)
@@ -299,11 +260,13 @@ async def give_place_feedback(
 
 
 async def _detail(db: AsyncSession, transaction_id: int, user_id: int) -> TransactionDetail:
-    transaction, category, account_currency_code = await TransactionRepository(db).get_detail_for_user(
-        transaction_id, user_id,
-    )
+    row = await TransactionRepository(db).get_detail_for_user(transaction_id, user_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+    transaction, category, account_currency_code = row
+    recurring = await RecurringPaymentRepository(db).list_for_user(user_id)
     return TransactionDetail(
-        **_to_list_item(transaction, category, account_currency_code).model_dump(),
+        **_to_list_item(transaction, category, account_currency_code, recurring).model_dump(),
         balance=transaction.balance,
         comment=transaction.comment,
         counter_name=transaction.counter_name,

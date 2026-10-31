@@ -82,7 +82,8 @@ async def new_subscriptions(db: AsyncSession, user: User, now: datetime) -> list
             data={"recurring_id": row.id},
         )
         for row in rows
-        if row.created_at >= since and first_scan is not None and row.created_at > first_scan + FIRST_SCAN_GAP
+        if row.user_kind is None and row.created_at >= since
+        and first_scan is not None and row.created_at > first_scan + FIRST_SCAN_GAP
     ]
 
 

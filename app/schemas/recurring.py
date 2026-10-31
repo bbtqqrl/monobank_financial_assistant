@@ -47,5 +47,8 @@ class RecurringPaymentDetail(RecurringPaymentItem):
 
 class UpdateRecurringPaymentRequest(BaseModel):
     answer: Literal["confirm", "decline", "cancel", "resume"] | None = None
-    kind: RecurringKind | None = None
     name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class MarkRecurringRequest(BaseModel):
+    transaction_id: int

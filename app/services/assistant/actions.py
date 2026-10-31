@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Literal
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,7 @@ from app.services.categorization_service import (
     check_category_fits_amount,
 )
 from app.services.errors import ConflictError, InvalidRequestError, NotFoundError, ServiceError
+from app.services.recurring_service import RecurringService
 from app.services.transaction_service import TransactionService
 
 ACTION_TTL = timedelta(hours=24)
@@ -73,6 +75,11 @@ class TransactionEditPayload(BaseModel):
 
 class TransactionDeletePayload(BaseModel):
     transaction_id: int
+
+
+class RecurringMarkPayload(BaseModel):
+    transaction_id: int
+    kind: Literal["subscription", "regular"]
 
 
 @dataclass(frozen=True)
@@ -262,6 +269,23 @@ async def execute_transaction_delete(
     return preview
 
 
+async def preview_recurring_mark(
+    db: AsyncSession, user_id: int, payload: RecurringMarkPayload, zone: ZoneInfo,
+) -> dict:
+    transaction, category = await _transaction(db, user_id, payload.transaction_id)
+    if transaction.amount >= 0:
+        raise InvalidRequestError("Only expenses can be marked as recurring")
+    return {**_brief(transaction, category, zone), "kind": payload.kind}
+
+
+async def execute_recurring_mark(
+    db: AsyncSession, user_id: int, payload: RecurringMarkPayload, zone: ZoneInfo,
+) -> dict:
+    preview = await preview_recurring_mark(db, user_id, payload, zone)
+    row = await RecurringService(db).mark(payload.transaction_id, user_id, payload.kind)
+    return {**preview, "recurring_id": row.id, "name": row.name, "charges_count": row.charges_count}
+
+
 ACTION_TYPES = {
     action.name: action
     for action in (
@@ -281,6 +305,10 @@ ACTION_TYPES = {
         ActionType(
             "transaction_delete", "Видалення транзакції", TransactionDeletePayload,
             preview_transaction_delete, execute_transaction_delete,
+        ),
+        ActionType(
+            "recurring_mark", "Регулярний платіж", RecurringMarkPayload,
+            preview_recurring_mark, execute_recurring_mark,
         ),
     )
 }

@@ -123,11 +123,14 @@ def is_whole_merchant(cluster: Cluster) -> bool:
     return bool(cluster.slugs & REGULAR_CATEGORY_SLUGS)
 
 
-def subscription_merchant(cluster: Cluster) -> bool:
-    slugs = cluster.slugs
+def is_subscription_merchant(mcc: int | None, slugs: set[str]) -> bool:
     if slugs & REGULAR_CATEGORY_SLUGS:
         return False
-    return cluster.mcc in SUBSCRIPTION_MCCS or bool(slugs & SUBSCRIPTION_CATEGORY_SLUGS)
+    return mcc in SUBSCRIPTION_MCCS or bool(slugs & SUBSCRIPTION_CATEGORY_SLUGS)
+
+
+def subscription_merchant(cluster: Cluster) -> bool:
+    return is_subscription_merchant(cluster.mcc, cluster.slugs)
 
 
 def has_monthly_rhythm(cluster: Cluster) -> bool:
