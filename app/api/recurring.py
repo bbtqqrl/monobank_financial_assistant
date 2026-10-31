@@ -15,7 +15,7 @@ from app.schemas.recurring import (
     RecurringPaymentsResponse,
     UpdateRecurringPaymentRequest,
 )
-from app.services.recurring_detection import SUBSCRIPTION
+from app.services.recurring_detection import REGULAR, SUBSCRIPTION
 from app.services.recurring_service import RecurringService, payment_item, payments_summary
 
 router = APIRouter(prefix="/recurring", tags=["Recurring payments"])
@@ -53,6 +53,15 @@ async def mark_recurring(
 ):
     service = RecurringService(db)
     return await _detail(service, await service.mark(data.transaction_id, current_user.id, SUBSCRIPTION))
+
+
+@router.get("/regular", response_model=RecurringPaymentsResponse)
+async def list_regular(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    now = int(time.time())
+    return payments_summary(await RecurringService(db).list(current_user.id, REGULAR, now), now)
 
 
 @router.get("/{payment_id}", response_model=RecurringPaymentDetail)

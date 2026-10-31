@@ -40,6 +40,9 @@ from app.schemas.analytics import (
     PlaceSpendItem,
     PlacesResponse,
     SpendingResponse,
+    TripItem,
+    TripPlace,
+    TripsResponse,
 )
 from app.core.currencies import alpha_code
 from app.services.merchant_key import build_merchant_key
@@ -58,6 +61,10 @@ SUMMARY_HISTORY_WEEKS = 8
 MIN_SUMMARY_WEEKS = 4
 SUMMARY_TOP_CATEGORIES = 3
 EQUAL_TOLERANCE = 0.01
+TRIP_MAX_GAP_DAYS = 2
+TRIP_LOOKAROUND_DAYS = 60
+TRIPS_DEFAULT_DAYS = 365
+HOME_CITY_LOOKBACK_DAYS = 180
 
 MONTH_LOCATIVE = (
     "січні", "лютому", "березні", "квітні", "травні", "червні",
@@ -140,6 +147,41 @@ def share(amount: int, total: int) -> float:
 
 def format_uah(kopecks: int) -> str:
     return f"{round(kopecks / 100):,}".replace(",", " ") + " ₴"
+
+
+def split_trips(city: str, rows: list[dict]) -> list[TripItem]:
+    groups: list[list[dict]] = []
+    for row in sorted(rows, key=lambda row: row["day"]):
+        day = date.fromisoformat(row["day"])
+        if groups and (day - date.fromisoformat(groups[-1][-1]["day"])).days <= TRIP_MAX_GAP_DAYS + 1:
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+
+    trips = []
+    for group in groups:
+        places: dict[int, TripPlace] = {}
+        for row in group:
+            place = places.setdefault(row["place_id"], TripPlace(
+                place_id=row["place_id"], name=row["place_name"], type_name=row["place_type"],
+                amount=0, transaction_count=0,
+            ))
+            place.amount -= row["sum"]
+            place.transaction_count += row["count"]
+        amount = -sum(row["sum"] for row in group)
+        if amount <= 0:
+            continue
+        start, end = date.fromisoformat(group[0]["day"]), date.fromisoformat(group[-1]["day"])
+        trips.append(TripItem(
+            city=city,
+            start=start,
+            end=end,
+            days=(end - start).days + 1,
+            amount=amount,
+            transaction_count=sum(row["count"] for row in group),
+            places=sorted((p for p in places.values() if p.amount > 0), key=lambda p: (-p.amount, p.name)),
+        ))
+    return trips
 
 
 def growth_streak(values: list[int]) -> int:
@@ -582,6 +624,36 @@ class AnalyticsService:
             unlocated_amount=max(total - sum(item.amount for item in items), 0),
             items=items,
         )
+
+    async def trips(self, period: Period, sort: str) -> TripsResponse:
+        home_city = await self._home_city(period.end)
+        around = timedelta(days=TRIP_LOOKAROUND_DAYS)
+        by_city: dict[str, list[dict]] = defaultdict(list)
+        for row in await self._aggregate(Period(period.start - around, period.end + around), ["day", "place"]):
+            if row["place_city"] is not None and row["place_city"] != home_city:
+                by_city[row["place_city"]].append(row)
+        items = [
+            trip for city, rows in by_city.items() for trip in split_trips(city, rows)
+            if trip.end >= period.start and trip.start <= period.end
+        ]
+        items.sort(key=lambda trip: (-trip.start.toordinal(), trip.city))
+        if sort == "amount":
+            items.sort(key=lambda trip: -trip.amount)
+        elif sort == "city":
+            items.sort(key=lambda trip: trip.city)
+        return TripsResponse(period=period.info(), home_city=home_city, items=items)
+
+    async def _home_city(self, end: date) -> str | None:
+        date_from, date_to = self._bounds(Period(end - timedelta(days=HOME_CITY_LOOKBACK_DAYS - 1), end))
+        rows = await self.repo.aggregate(
+            self.user_id,
+            TransactionFilter(date_from=date_from, date_to=date_to, kinds=EXPENSE_KINDS),
+            self.timezone,
+            group_by=["day", "city"],
+            metrics=["count"],
+        )
+        days = Counter(row["city"] for row in rows if row["city"] is not None)
+        return min(days, key=lambda city: (-days[city], city)) if days else None
 
     async def _located(self, period: Period, dimension: str) -> tuple[int, list[dict]]:
         totals = await self._aggregate(period, [])

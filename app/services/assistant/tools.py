@@ -38,6 +38,7 @@ from app.services.assistant.actions import (
     CategoryChange,
     RecategorizePayload,
     RecurringMarkPayload,
+    SubscriptionCancelPayload,
     TransactionCreatePayload,
     TransactionDeletePayload,
     TransactionEditPayload,
@@ -268,6 +269,15 @@ class TransactionIdArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     transaction_id: int = Field(description="id ручної транзакції з search_transactions.")
+
+
+class CancelSubscriptionArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recurring_id: int = Field(description="id підписки з get_recurring.")
+    answer: Literal["cancel", "decline"] = Field(
+        description="cancel - людина відписалась, decline - це не підписка.",
+    )
 
 
 class MarkRecurringArgs(BaseModel):
@@ -576,6 +586,12 @@ async def propose_recurring(ctx: ToolContext, args: MarkRecurringArgs) -> dict:
     ))
 
 
+async def propose_subscription_cancel(ctx: ToolContext, args: CancelSubscriptionArgs) -> dict:
+    return await _propose(ctx, "subscription_cancel", SubscriptionCancelPayload(
+        recurring_id=args.recurring_id, answer=args.answer,
+    ))
+
+
 async def remember(ctx: ToolContext, args: RememberArgs) -> dict:
     memories = MemoryRepository(ctx.db)
     if await memories.count_for_user(ctx.user_id) >= MAX_MEMORIES:
@@ -820,6 +836,18 @@ ACTION_TOOLS = (
         ),
         args=MarkRecurringArgs,
         handler=propose_recurring,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_subscription_cancel",
+        label="Прибираю підписку",
+        description=(
+            "Прибрати підписку з get_recurring (kind=subscription). answer=cancel, коли людина відписалась: підписка "
+            "лишається в списку як скасована і не рахується в суму за місяць. answer=decline, коли це взагалі не "
+            "підписка: вона зникає зі списку і більше не визначається."
+        ),
+        args=CancelSubscriptionArgs,
+        handler=propose_subscription_cancel,
         proposes=True,
     ),
 )

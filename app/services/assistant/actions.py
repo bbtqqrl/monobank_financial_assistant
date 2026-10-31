@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.currencies import alpha_code
 from app.db.models.pending_action import PendingAction
 from app.repositories.budget import BudgetRepository
 from app.repositories.category import CategoryRepository
@@ -80,6 +81,11 @@ class TransactionDeletePayload(BaseModel):
 class RecurringMarkPayload(BaseModel):
     transaction_id: int
     kind: Literal["subscription", "regular"]
+
+
+class SubscriptionCancelPayload(BaseModel):
+    recurring_id: int
+    answer: Literal["cancel", "decline"]
 
 
 @dataclass(frozen=True)
@@ -286,6 +292,26 @@ async def execute_recurring_mark(
     return {**preview, "recurring_id": row.id, "name": row.name, "charges_count": row.charges_count}
 
 
+async def preview_subscription_cancel(
+    db: AsyncSession, user_id: int, payload: SubscriptionCancelPayload, zone: ZoneInfo,
+) -> dict:
+    row = await RecurringService(db).get_subscription(payload.recurring_id, user_id)
+    if payload.answer == "cancel" and row.cancelled_at is not None:
+        raise InvalidRequestError("The subscription is already cancelled")
+    return {
+        "recurring_id": row.id, "name": row.name, "amount": row.amount,
+        "currency": alpha_code(row.currency_code), "answer": payload.answer,
+    }
+
+
+async def execute_subscription_cancel(
+    db: AsyncSession, user_id: int, payload: SubscriptionCancelPayload, zone: ZoneInfo,
+) -> dict:
+    preview = await preview_subscription_cancel(db, user_id, payload, zone)
+    await RecurringService(db).update(payload.recurring_id, user_id, answer=payload.answer)
+    return preview
+
+
 ACTION_TYPES = {
     action.name: action
     for action in (
@@ -309,6 +335,10 @@ ACTION_TYPES = {
         ActionType(
             "recurring_mark", "Регулярний платіж", RecurringMarkPayload,
             preview_recurring_mark, execute_recurring_mark,
+        ),
+        ActionType(
+            "subscription_cancel", "Скасування підписки", SubscriptionCancelPayload,
+            preview_subscription_cancel, execute_subscription_cancel,
         ),
     )
 }
