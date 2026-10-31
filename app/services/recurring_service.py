@@ -9,6 +9,7 @@ from app.repositories.recurring_payment import RecurringPaymentRepository
 from app.schemas.recurring import RecurringPaymentItem, RecurringPaymentsResponse
 from app.schemas.transaction import CategoryBrief
 from app.services.errors import InvalidRequestError, NotFoundError
+from app.services.merchant_key import build_merchant_key
 from app.services.recurring_detection import (
     DAY_SECONDS,
     SUBSCRIPTION,
@@ -16,6 +17,7 @@ from app.services.recurring_detection import (
     Cluster,
     cluster_charges,
     detect_kind,
+    is_subscription_merchant,
     is_whole_merchant,
     monthly_amount,
     payment_state,
@@ -68,6 +70,22 @@ def payments_summary(rows: list[RecurringPayment], now: int) -> RecurringPayment
     items.sort(key=lambda item: (item.state == "inactive", item.cancelled, -item.monthly_amount_uah))
     total = sum(item.monthly_amount_uah for item in items if in_monthly_total(item))
     return RecurringPaymentsResponse(monthly_total_uah=total, items=items)
+
+
+def subscription_marks(rows: list[RecurringPayment], transaction, category) -> tuple[int | None, bool]:
+    if transaction.amount >= 0:
+        return None, False
+    description = transaction.description or ""
+    key = build_merchant_key(description) or description.strip().lower()
+    amount = abs(transaction.operation_amount if transaction.operation_amount is not None else transaction.amount)
+    row = next((row for row in rows if row.id == transaction.recurring_payment_id), None) or next(
+        (row for row in rows if row.merchant_key == key and row.currency_code == transaction.currency_code
+         and similar(row.amount, amount)),
+        None,
+    )
+    if row is not None:
+        return (row.id if row.kind == SUBSCRIPTION else None), False
+    return None, is_subscription_merchant(transaction.mcc, {category.slug} if category is not None else set())
 
 
 def _untouched(row: RecurringPayment) -> bool:

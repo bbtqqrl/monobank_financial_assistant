@@ -300,3 +300,27 @@ async def test_mark_resumes_cancelled_and_rejects_non_expenses():
     assert row.cancelled_at is None
     with pytest.raises(InvalidRequestError):
         await service(repo).mark(123456, 5, SUBSCRIPTION, NOW)
+
+
+def test_subscription_marks_for_transactions():
+    from app.services.recurring_service import subscription_marks
+
+    def row(id, kind, key, amount, currency=980):
+        return SimpleNamespace(id=id, kind=kind, merchant_key=key, amount=amount, currency_code=currency)
+
+    def tx(description, amount, mcc, linked=None, currency=980):
+        return SimpleNamespace(description=description, amount=amount, operation_amount=None, mcc=mcc,
+                               currency_code=currency, recurring_payment_id=linked)
+
+    rows = [row(1, SUBSCRIPTION, "netflix", 25000), row(2, None, "apple", 4900), row(3, REGULAR, "vodafone", 26000)]
+    subs = SimpleNamespace(slug=SUBS)
+    assert subscription_marks(rows, tx("Netflix", -25000, 4899, linked=1), subs) == (1, False)
+    assert subscription_marks(rows, tx("Netflix", -26000, 4899), subs) == (1, False)
+    assert subscription_marks(rows, tx("Netflix", -25000, 4899, currency=840), subs) == (None, True)
+    assert subscription_marks(rows, tx("Netflix", -45000, 4899), subs) == (None, True)
+    assert subscription_marks(rows, tx("Apple", -4900, 5818), subs) == (None, False)
+    assert subscription_marks(rows, tx("Vodafone", -26000, 4814), None) == (None, False)
+    assert subscription_marks(rows, tx("YouTube", -9900, 1234), subs) == (None, True)
+    assert subscription_marks(rows, tx("Київстар Інтернет", -20000, 4899), SimpleNamespace(slug="internet")) == (None, False)
+    assert subscription_marks(rows, tx("Сільпо", -50000, 5411), SimpleNamespace(slug="produkty")) == (None, False)
+    assert subscription_marks(rows, tx("Netflix", 25000, 4899), subs) == (None, False)

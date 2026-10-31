@@ -40,6 +40,8 @@ class TransactionListItem(BaseModel):
     place: PlaceBrief | None
     place_method: str | None
     place_confirmed: bool | None
+    subscription_id: int | None
+    looks_like_subscription: bool
 
 
 class TransactionDetail(TransactionListItem):
