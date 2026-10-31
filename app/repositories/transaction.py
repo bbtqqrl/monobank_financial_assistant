@@ -35,6 +35,15 @@ def _with_category_and_currency():
     )
 
 
+def _waiting_for_place() -> list:
+    return [
+        TransactionRaw.latitude.is_not(None),
+        TransactionRaw.place_method.is_(None),
+        TransactionRaw.place_id.is_(None),
+        TransactionRaw.place_confirmed.is_(None),
+    ]
+
+
 class TransactionRepository:
 
     def __init__(self, db: AsyncSession):
@@ -365,6 +374,23 @@ class TransactionRepository:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def list_unplaced(self, since: int, limit: int) -> list[tuple[int, int]]:
+        result = await self.db.execute(
+            select(TransactionRaw.id, TransactionRaw.user_id)
+            .where(*_waiting_for_place(), TransactionRaw.time >= since)
+            .order_by(TransactionRaw.time.desc())
+            .limit(limit)
+        )
+        return [tuple(row) for row in result.all()]
+
+    async def set_found_place(self, transaction_id: int, place_id: int | None, method: str) -> bool:
+        result = await self.db.execute(
+            update(TransactionRaw)
+            .where(TransactionRaw.id == transaction_id, *_waiting_for_place())
+            .values(place_id=place_id, place_method=method)
+        )
+        return result.rowcount > 0
 
     async def create_manual(
         self,

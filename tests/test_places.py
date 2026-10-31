@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.repositories.place import PlaceRepository
+from app.repositories.transaction import TransactionRepository
 from app.schemas.place import PlaceResponse
 from app.services import places
 from app.services.errors import InvalidRequestError, NotFoundError, ServiceUnavailableError
@@ -112,9 +113,13 @@ async def test_upsert_statement_compiles():
 class FakeDb:
     def __init__(self):
         self.commits = 0
+        self.rollbacks = 0
 
     async def commit(self):
         self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
 
 
 class FakePlaces:
@@ -159,7 +164,11 @@ def location_service(transaction, candidates=(), fails=False, saved=(), mcc_type
         calls["upserted"].append(place)
         return SimpleNamespace(id=99, latitude=place.latitude, longitude=place.longitude, name=place.name)
 
-    service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user)
+    async def set_found_place(transaction_id, place_id, method):
+        calls["found"] = (transaction_id, place_id, method)
+        return calls.get("still_waiting", True)
+
+    service.transactions = SimpleNamespace(get_by_id_for_user=get_by_id_for_user, set_found_place=set_found_place)
     service.mcc_types = SimpleNamespace(get=get_mcc)
     service.user_places = SimpleNamespace(list_near=list_near, rejected_provider_ids=rejected_provider_ids, save=save)
     service.place_repo = SimpleNamespace(upsert=upsert)
@@ -278,3 +287,60 @@ async def test_rejected_place_is_skipped_in_cache_and_google():
     service, calls = location_service(tx, candidates=[found("3"), found("KREDENS CAFE", 11)], saved=[(rejected, True)])
     await service.set_location(1, LAT, LON)
     assert (tx.place.name, tx.place_method, calls["places"].calls) == ("KREDENS CAFE", PlaceMethod.SINGLE, 1)
+
+
+def waiting():
+    tx = located()
+    tx.place_method = None
+    return tx
+
+
+async def test_retry_saves_place_found_after_outage():
+    service, calls = location_service(waiting(), candidates=[found("KREDENS CAFE")])
+    assert await service.retry_place(1) is True
+    assert (calls["found"], calls["saved"], service.db.commits) == (
+        (1, 99, PlaceMethod.SINGLE), {("kredens cafe", 99): False}, 1,
+    )
+
+
+async def test_retry_saves_not_found_to_stop_retrying():
+    service, calls = location_service(waiting())
+    assert await service.retry_place(1) is True
+    assert calls["found"] == (1, None, PlaceMethod.NOT_FOUND)
+
+
+async def test_retry_waits_while_search_is_down():
+    service, calls = location_service(waiting(), fails=True)
+    assert await service.retry_place(1) is False
+    assert ("found" not in calls, service.db.commits) == (True, 0)
+
+
+async def test_retry_skips_place_picked_by_user():
+    tx = waiting()
+    tx.place = SimpleNamespace(id=7)
+    service, calls = location_service(tx, candidates=[found()])
+    assert await service.retry_place(1) is False
+    assert calls["places"].calls == 0
+
+
+async def test_retry_does_not_override_feedback_given_meanwhile():
+    service, calls = location_service(waiting(), candidates=[found("KREDENS CAFE")])
+    calls["still_waiting"] = False
+    assert await service.retry_place(1) is False
+    assert (service.db.commits, service.db.rollbacks) == (0, 1)
+
+
+async def test_unplaced_queries_skip_user_answers():
+    statements = []
+
+    async def execute(statement):
+        statements.append(str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})))
+        return SimpleNamespace(all=lambda: [(1, 5)], rowcount=1)
+
+    repo = TransactionRepository(SimpleNamespace(execute=execute))
+    assert await repo.list_unplaced(100, 50) == [(1, 5)]
+    assert await repo.set_found_place(1, None, PlaceMethod.NOT_FOUND) is True
+    for sql in statements:
+        assert "transactions.latitude IS NOT NULL" in sql and "transactions.place_method IS NULL" in sql
+        assert "transactions.place_id IS NULL" in sql and "transactions.place_confirmed IS NULL" in sql
+    assert "transactions.time >= 100" in statements[0] and "LIMIT 50" in statements[0]

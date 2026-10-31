@@ -39,6 +39,19 @@ class TransactionLocationService:
         await self.db.commit()
         return transaction
 
+    async def retry_place(self, transaction_id: int) -> bool:
+        transaction = await self._get(transaction_id)
+        if transaction.latitude is None or transaction.place_method is not None or transaction.place is not None:
+            return False
+        place, method = await self._locate(transaction, transaction.latitude, transaction.longitude)
+        if method is None:
+            return False
+        if not await self.transactions.set_found_place(transaction.id, place.id if place else None, method):
+            await self.db.rollback()
+            return False
+        await self.db.commit()
+        return True
+
     async def place_candidates(self, transaction_id: int) -> list[PlaceResponse]:
         return await self._search_around(await self._get(transaction_id))
 
@@ -106,7 +119,6 @@ class TransactionLocationService:
         try:
             candidates = await self.places.search(latitude, longitude, place_filter)
         except ServiceUnavailableError:
-            # TODO: повторити пошук місця пізніше для транзакцій з координатами, але без place_method
             return None, None
 
         if merchant_key:
