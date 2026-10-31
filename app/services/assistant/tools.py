@@ -37,6 +37,7 @@ from app.services.assistant.actions import (
     BudgetsPayload,
     CategoryChange,
     RecategorizePayload,
+    RecurringMarkPayload,
     TransactionCreatePayload,
     TransactionDeletePayload,
     TransactionEditPayload,
@@ -267,6 +268,15 @@ class TransactionIdArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     transaction_id: int = Field(description="id ручної транзакції з search_transactions.")
+
+
+class MarkRecurringArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_id: int = Field(description="id витрати з search_transactions.")
+    kind: Literal["subscription", "regular"] = Field(
+        default="subscription", description="subscription - підписка, regular - регулярний платіж.",
+    )
 
 
 class SearchTransactionsArgs(BaseModel):
@@ -560,6 +570,12 @@ async def propose_transaction_delete(ctx: ToolContext, args: TransactionIdArgs) 
     return await _propose(ctx, "transaction_delete", TransactionDeletePayload(transaction_id=args.transaction_id))
 
 
+async def propose_recurring(ctx: ToolContext, args: MarkRecurringArgs) -> dict:
+    return await _propose(ctx, "recurring_mark", RecurringMarkPayload(
+        transaction_id=args.transaction_id, kind=args.kind,
+    ))
+
+
 async def remember(ctx: ToolContext, args: RememberArgs) -> dict:
     memories = MemoryRepository(ctx.db)
     if await memories.count_for_user(ctx.user_id) >= MAX_MEMORIES:
@@ -793,6 +809,17 @@ ACTION_TOOLS = (
         description="Видалити ручну транзакцію. Транзакції з Monobank видалити не можна.",
         args=TransactionIdArgs,
         handler=propose_transaction_delete,
+        proposes=True,
+    ),
+    Tool(
+        name="propose_recurring",
+        label="Додаю регулярний платіж",
+        description=(
+            "Позначити витрату як підписку чи регулярний платіж, коли людина про це каже, а в get_recurring її немає "
+            "або вона там з іншим типом. Наступні такі самі списання додаються туди автоматично."
+        ),
+        args=MarkRecurringArgs,
+        handler=propose_recurring,
         proposes=True,
     ),
 )

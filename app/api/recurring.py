@@ -1,6 +1,6 @@
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -9,12 +9,13 @@ from app.db.models.recurring_payment import RecurringPayment
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.recurring import (
+    MarkRecurringRequest,
     RecurringCharge,
-    RecurringKind,
     RecurringPaymentDetail,
     RecurringPaymentsResponse,
     UpdateRecurringPaymentRequest,
 )
+from app.services.recurring_detection import SUBSCRIPTION
 from app.services.recurring_service import RecurringService, payment_item, payments_summary
 
 router = APIRouter(prefix="/recurring", tags=["Recurring payments"])
@@ -37,15 +38,23 @@ async def _detail(service: RecurringService, row: RecurringPayment) -> Recurring
 
 @router.get("", response_model=RecurringPaymentsResponse)
 async def list_recurring(
-    kind: RecurringKind | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     now = int(time.time())
-    return payments_summary(await RecurringService(db).list(current_user.id, kind, now), now)
+    return payments_summary(await RecurringService(db).list(current_user.id, SUBSCRIPTION, now), now)
 
 
-# TODO: ручка, щоб юзер сам позначив транзакцію як підписку, не чекаючи другого списання
+@router.post("", response_model=RecurringPaymentDetail)
+async def mark_recurring(
+    data: MarkRecurringRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = RecurringService(db)
+    return await _detail(service, await service.mark(data.transaction_id, current_user.id, SUBSCRIPTION))
+
+
 @router.get("/{payment_id}", response_model=RecurringPaymentDetail)
 async def get_recurring(
     payment_id: int,
@@ -53,7 +62,7 @@ async def get_recurring(
     db: AsyncSession = Depends(get_db),
 ):
     service = RecurringService(db)
-    return await _detail(service, await service.get(payment_id, current_user.id))
+    return await _detail(service, await service.get_subscription(payment_id, current_user.id))
 
 
 @router.patch("/{payment_id}", response_model=RecurringPaymentDetail | None)
@@ -64,5 +73,5 @@ async def update_recurring(
     db: AsyncSession = Depends(get_db),
 ):
     service = RecurringService(db)
-    row = await service.update(payment_id, current_user.id, data.answer, data.kind, data.name)
-    return await _detail(service, row) if row.kind is not None else None
+    row = await service.update(payment_id, current_user.id, data.answer, data.name)
+    return await _detail(service, row) if row.kind == SUBSCRIPTION else None

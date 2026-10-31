@@ -160,10 +160,35 @@ class RecurringService:
             and not (row.kind == SUBSCRIPTION and state(row, now) == "inactive")
         ]
 
-    async def get(self, payment_id: int, user_id: int) -> RecurringPayment:
+    async def mark(self, transaction_id: int, user_id: int, kind: str, now: int | None = None) -> RecurringPayment:
+        now = now or int(time.time())
+        await self.repo.lock_user(user_id)
+        found = await self.repo.charges(user_id, now - LOOKBACK_DAYS * DAY_SECONDS, transaction_id)
+        if not found:
+            raise InvalidRequestError("Only expenses from the last 400 days can be marked as recurring")
+        cluster = Cluster(found[0].merchant_key, found[0].currency_code, found)
+        rows = await self.repo.list_for_user(user_id)
+        row = next((row for row in rows if row.id == found[0].recurring_payment_id), None)
+        row = row or next((row for row in rows if _matches(row, cluster)), None)
+        if row is None:
+            row = RecurringPayment(
+                user_id=user_id, merchant_key=cluster.merchant_key, name=cluster.name,
+                currency_code=cluster.currency_code,
+            )
+            _apply(row, cluster, kind)
+            self.db.add(row)
+        row.kind = row.user_kind = kind
+        row.declined_kind = None
+        row.cancelled_at = None
+        await self.db.flush()
+        await self.refresh(user_id, now)
+        await self.db.refresh(row)
+        return row
+
+    async def get_subscription(self, payment_id: int, user_id: int) -> RecurringPayment:
         row = await self.repo.get_for_user(payment_id, user_id)
-        if row is None or row.kind is None:
-            raise NotFoundError("Recurring payment not found")
+        if row is None or row.kind != SUBSCRIPTION:
+            raise NotFoundError("Subscription not found")
         return row
 
     async def transactions(self, payment_id: int):
@@ -174,17 +199,11 @@ class RecurringService:
         payment_id: int,
         user_id: int,
         answer: str | None = None,
-        kind: str | None = None,
         name: str | None = None,
     ) -> RecurringPayment:
-        if answer == "decline" and kind is not None:
-            raise InvalidRequestError("Can't decline and set kind at once")
-        row = await self.get(payment_id, user_id)
+        row = await self.get_subscription(payment_id, user_id)
         if name is not None:
             row.name = name
-        if kind is not None:
-            row.kind = row.user_kind = kind
-            row.declined_kind = None
         if answer == "confirm":
             row.user_kind = row.kind
             row.declined_kind = None
